@@ -61,6 +61,12 @@ impl ControllerType {
 
 const DEFAULT_RETROARCH_CORES_PATH: &str = "/usr/lib/x86_64-linux-gnu/libretro";
 const DEFAULT_SOUND_VOLUME: i64 = 70;
+// Relay's own product defaults (REL-142), not inherited from RetroArch's own config.def.h
+// defaults -- video_smooth/video_scale_integer/run_ahead_enabled are genuine product choices for
+// this console, independent of whatever upstream RetroArch happens to default to.
+const DEFAULT_VIDEO_SMOOTH: bool = false;
+const DEFAULT_VIDEO_SCALE_INTEGER: bool = true;
+const DEFAULT_RUN_AHEAD_ENABLED: bool = false;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct GeneralSettings {
@@ -71,6 +77,9 @@ pub struct GeneralSettings {
     pub wallpaper: Option<String>,
     pub sound_volume: i64,
     pub rumble_enabled: bool,
+    pub video_smooth: bool,
+    pub video_scale_integer: bool,
+    pub run_ahead_enabled: bool,
 }
 
 pub async fn get_general_settings(pool: &SqlitePool) -> Result<GeneralSettings, sqlx::Error> {
@@ -88,6 +97,9 @@ pub async fn get_general_settings(pool: &SqlitePool) -> Result<GeneralSettings, 
             .unwrap_or(DEFAULT_SOUND_VOLUME)
             .clamp(0, 100),
         rumble_enabled: get(pool, "rumbleEnabled").await?.map(|v| v == "true").unwrap_or(true),
+        video_smooth: get(pool, "videoSmooth").await?.map(|v| v == "true").unwrap_or(DEFAULT_VIDEO_SMOOTH),
+        video_scale_integer: get(pool, "videoScaleInteger").await?.map(|v| v == "true").unwrap_or(DEFAULT_VIDEO_SCALE_INTEGER),
+        run_ahead_enabled: get(pool, "runAheadEnabled").await?.map(|v| v == "true").unwrap_or(DEFAULT_RUN_AHEAD_ENABLED),
     })
 }
 
@@ -119,6 +131,18 @@ pub async fn set_rumble_enabled(pool: &SqlitePool, value: bool) -> Result<(), sq
     set(pool, "rumbleEnabled", if value { "true" } else { "false" }).await
 }
 
+pub async fn set_video_smooth(pool: &SqlitePool, value: bool) -> Result<(), sqlx::Error> {
+    set(pool, "videoSmooth", if value { "true" } else { "false" }).await
+}
+
+pub async fn set_video_scale_integer(pool: &SqlitePool, value: bool) -> Result<(), sqlx::Error> {
+    set(pool, "videoScaleInteger", if value { "true" } else { "false" }).await
+}
+
+pub async fn set_run_ahead_enabled(pool: &SqlitePool, value: bool) -> Result<(), sqlx::Error> {
+    set(pool, "runAheadEnabled", if value { "true" } else { "false" }).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -145,6 +169,9 @@ mod tests {
         assert_eq!(settings.wallpaper, None);
         assert_eq!(settings.sound_volume, DEFAULT_SOUND_VOLUME);
         assert!(settings.rumble_enabled);
+        assert_eq!(settings.video_smooth, DEFAULT_VIDEO_SMOOTH);
+        assert_eq!(settings.video_scale_integer, DEFAULT_VIDEO_SCALE_INTEGER);
+        assert_eq!(settings.run_ahead_enabled, DEFAULT_RUN_AHEAD_ENABLED);
     }
 
     #[tokio::test]
@@ -158,6 +185,9 @@ mod tests {
         set_wallpaper(&pool, Some("space.jpg")).await.unwrap();
         set_sound_volume(&pool, 42).await.unwrap();
         set_rumble_enabled(&pool, false).await.unwrap();
+        set_video_smooth(&pool, true).await.unwrap();
+        set_video_scale_integer(&pool, false).await.unwrap();
+        set_run_ahead_enabled(&pool, true).await.unwrap();
 
         let settings = get_general_settings(&pool).await.unwrap();
 
@@ -168,6 +198,9 @@ mod tests {
         assert_eq!(settings.wallpaper.as_deref(), Some("space.jpg"));
         assert_eq!(settings.sound_volume, 42);
         assert!(!settings.rumble_enabled);
+        assert!(settings.video_smooth);
+        assert!(!settings.video_scale_integer);
+        assert!(settings.run_ahead_enabled);
     }
 
     #[tokio::test]

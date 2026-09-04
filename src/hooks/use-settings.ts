@@ -30,6 +30,9 @@ export type GeneralSettings = {
   wallpaper: string | null;
   sound_volume: number;
   rumble_enabled: boolean;
+  video_smooth: boolean;
+  video_scale_integer: boolean;
+  run_ahead_enabled: boolean;
 };
 
 const GENERAL_SETTINGS_KEY = ["settings", "general"];
@@ -75,6 +78,48 @@ export function useSetRumbleEnabled() {
   });
 }
 
+// RetroArch video/performance preferences (REL-144) -- surfaced in Settings > UI. The backend/IPC
+// round-trip: get_general_settings threads them into every launch's appendconfig (see
+// build_retroarch_options).
+export function useVideoSmooth(): boolean {
+  const { data } = useGeneralSettings();
+  return data?.video_smooth ?? false;
+}
+
+export function useSetVideoSmooth() {
+  const invalidate = useInvalidateGeneralSettings();
+  return useMutation({
+    mutationFn: (enabled: boolean) => invoke<void>("set_video_smooth", { enabled }),
+    onSuccess: invalidate,
+  });
+}
+
+export function useVideoScaleInteger(): boolean {
+  const { data } = useGeneralSettings();
+  return data?.video_scale_integer ?? true;
+}
+
+export function useSetVideoScaleInteger() {
+  const invalidate = useInvalidateGeneralSettings();
+  return useMutation({
+    mutationFn: (enabled: boolean) => invoke<void>("set_video_scale_integer", { enabled }),
+    onSuccess: invalidate,
+  });
+}
+
+export function useRunAheadEnabled(): boolean {
+  const { data } = useGeneralSettings();
+  return data?.run_ahead_enabled ?? false;
+}
+
+export function useSetRunAheadEnabled() {
+  const invalidate = useInvalidateGeneralSettings();
+  return useMutation({
+    mutationFn: (enabled: boolean) => invoke<void>("set_run_ahead_enabled", { enabled }),
+    onSuccess: invalidate,
+  });
+}
+
 export function useControllerType(): ControllerType {
   const { data } = useGeneralSettings();
   return data?.controller_type ?? "xbox";
@@ -85,6 +130,19 @@ export function useSetControllerType() {
   return useMutation({
     mutationFn: (controllerType: ControllerType) =>
       invoke<void>("set_controller_type", { controllerType }),
+    onSuccess: invalidate,
+  });
+}
+
+export function useRetroarchCoresPath(): string {
+  const { data } = useGeneralSettings();
+  return data?.retroarch_cores_path ?? "";
+}
+
+export function useSetRetroarchCoresPath() {
+  const invalidate = useInvalidateGeneralSettings();
+  return useMutation({
+    mutationFn: (path: string) => invoke<void>("set_retroarch_cores_path", { path }),
     onSuccess: invalidate,
   });
 }

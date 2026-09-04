@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { useCheckForUpdate, useDownloadAndInstallUpdate } from "./use-updates";
+import { useAppVersion, useCheckForUpdate, useDownloadAndInstallUpdate } from "./use-updates";
 import type { Update } from "@tauri-apps/plugin-updater";
 
 const checkMock = vi.fn();
@@ -14,6 +14,20 @@ const relaunchMock = vi.fn();
 vi.mock("@tauri-apps/plugin-process", () => ({
   relaunch: (...args: unknown[]) => relaunchMock(...args),
 }));
+
+const getVersionMock = vi.fn();
+vi.mock("@tauri-apps/api/app", () => ({
+  getVersion: (...args: unknown[]) => getVersionMock(...args),
+}));
+
+describe("useAppVersion", () => {
+  it("resolves to the running app's version", async () => {
+    getVersionMock.mockResolvedValue("0.1.0");
+    const { result } = renderHook(() => useAppVersion(), { wrapper });
+
+    await waitFor(() => expect(result.current.data).toBe("0.1.0"));
+  });
+});
 
 function wrapper({ children }: { children: ReactNode }) {
   const queryClient = new QueryClient();
@@ -51,10 +65,24 @@ describe("useDownloadAndInstallUpdate", () => {
     const { result } = renderHook(() => useDownloadAndInstallUpdate(), { wrapper });
 
     await act(async () => {
-      await result.current.mutateAsync(update);
+      await result.current.mutateAsync({ update });
     });
 
-    expect(downloadAndInstall).toHaveBeenCalled();
+    expect(downloadAndInstall).toHaveBeenCalledWith(undefined);
     expect(relaunchMock).toHaveBeenCalled();
+  });
+
+  it("passes onEvent straight through to downloadAndInstall", async () => {
+    const downloadAndInstall = vi.fn().mockResolvedValue(undefined);
+    const update = { downloadAndInstall } as unknown as Update;
+    const onEvent = vi.fn();
+
+    const { result } = renderHook(() => useDownloadAndInstallUpdate(), { wrapper });
+
+    await act(async () => {
+      await result.current.mutateAsync({ update, onEvent });
+    });
+
+    expect(downloadAndInstall).toHaveBeenCalledWith(onEvent);
   });
 });

@@ -52,3 +52,18 @@ pub async fn set_sound_volume(pool: State<'_, SqlitePool>, volume: i64) -> Resul
 pub async fn set_rumble_enabled(pool: State<'_, SqlitePool>, enabled: bool) -> Result<(), String> {
     settings::set_rumble_enabled(pool.inner(), enabled).await.map_err(crate::logging::err_to_string)
 }
+
+#[tauri::command]
+pub async fn set_video_smooth(pool: State<'_, SqlitePool>, enabled: bool) -> Result<(), String> {
+    settings::set_video_smooth(pool.inner(), enabled).await.map_err(crate::logging::err_to_string)
+}
+
+#[tauri::command]
+pub async fn set_video_scale_integer(pool: State<'_, SqlitePool>, enabled: bool) -> Result<(), String> {
+    settings::set_video_scale_integer(pool.inner(), enabled).await.map_err(crate::logging::err_to_string)
+}
+
+#[tauri::command]
+pub async fn set_run_ahead_enabled(pool: State<'_, SqlitePool>, enabled: bool) -> Result<(), String> {
+    settings::set_run_ahead_enabled(pool.inner(), enabled).await.map_err(crate::logging::err_to_string)
+}

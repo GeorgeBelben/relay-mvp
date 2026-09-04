@@ -1,6 +1,15 @@
 use tauri::{AppHandle, Manager};
 
+use crate::ingestion::paths;
 use crate::system::wallpaper;
+
+/// The frontend needs this to build a loadable URL for a wallpaper filename (asset-protocol scope
+/// + `library_root()/wallpapers/<filename>`) -- same reasoning, and same shape, as
+/// `commands::game_media::get_media_root_path`'s own doc comment for box art.
+#[tauri::command]
+pub fn get_library_root_path() -> String {
+    paths::library_root().to_string_lossy().into_owned()
+}
 
 /// There's no profile/auth system for OS-level login -- the real Linux account name is a more
 /// honest placeholder for "currently logged in user" than a fake one, and it's free. Reads $USER

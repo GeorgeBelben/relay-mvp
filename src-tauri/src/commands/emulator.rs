@@ -9,7 +9,7 @@ use crate::db::{games, roms, settings};
 use crate::emulator::command::{build_launch_command, RetroarchOptions, SystemLaunchConfig};
 use crate::emulator::process::{self, LauncherStatus};
 use crate::emulator::retroarch_command;
-use crate::emulator::retroarch_config::{self, GameLaunchDirs};
+use crate::emulator::retroarch_config::{self, GameLaunchDirs, RetroarchPreferences};
 use crate::ingestion::paths;
 use crate::systems;
 
@@ -119,7 +119,7 @@ async fn build_retroarch_options<R: tauri::Runtime>(
     game_id: &str,
     library_root: &Path,
 ) -> Result<RetroarchOptions, String> {
-    let cores_path = settings::get_general_settings(pool).await.map_err(crate::logging::err_to_string)?.retroarch_cores_path;
+    let general_settings = settings::get_general_settings(pool).await.map_err(crate::logging::err_to_string)?;
 
     let config_dir = app.path().app_data_dir().map_err(crate::logging::err_to_string)?.join("launch-configs");
     tokio::fs::create_dir_all(&config_dir).await.map_err(crate::logging::err_to_string)?;
@@ -129,9 +129,14 @@ async fn build_retroarch_options<R: tauri::Runtime>(
     let save_states_dir = library_root.join("savestates").join(system_id).join(game_id);
     let screenshots_dir = library_root.join("screenshots").join(system_id).join(game_id);
     let dirs = GameLaunchDirs { saves_dir: &saves_dir, save_states_dir: &save_states_dir, screenshots_dir: &screenshots_dir };
-    retroarch_config::write_launch_config(&append_config_path, &dirs).await.map_err(crate::logging::err_to_string)?;
+    let preferences = RetroarchPreferences {
+        video_smooth: general_settings.video_smooth,
+        video_scale_integer: general_settings.video_scale_integer,
+        run_ahead_enabled: general_settings.run_ahead_enabled,
+    };
+    retroarch_config::write_launch_config(&append_config_path, &dirs, &preferences).await.map_err(crate::logging::err_to_string)?;
 
-    Ok(RetroarchOptions { cores_path: PathBuf::from(cores_path), append_config_path })
+    Ok(RetroarchOptions { cores_path: PathBuf::from(general_settings.retroarch_cores_path), append_config_path })
 }
 
 #[cfg(test)]

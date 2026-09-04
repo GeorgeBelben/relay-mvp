@@ -13,13 +13,6 @@ import { ProfileAvatar } from "./profile-avatar";
 
 type View = "menu" | "profile";
 
-// Neither /settings nor /settings/profiles has been ported from the Electron MVP yet (same gap
-// the old header settings icon and ProfileSwitcherModal's "Manage Profiles" link already had) --
-// typed as plain `string`, not inline literals, so TanStack Router's route-literal check doesn't
-// reject them outright; same escape hatch FocusableLink's own `to: string` prop already relies on.
-const SETTINGS_PATH: string = "/settings";
-const MANAGE_PROFILES_PATH: string = "/settings/profiles";
-
 // Browsing-mode counterpart to QuickMenu (REL-137's in-game menu) -- opened by the "home" action
 // (see lib/system-menu/useSystemMenuListener) while nothing's playing. Deliberately a separate
 // component and store from QuickMenu, not a phase-branch of it (REL-138) -- and replaces both the
@@ -69,7 +62,7 @@ function SystemMenuActions({
             // route changes the same way QuickMenu does, so navigating away without closing would
             // leave it sitting open on top of the destination route.
             onClose();
-            navigate({ to: SETTINGS_PATH });
+            navigate({ to: "/settings" });
           }}
         />
       </List>
@@ -128,7 +121,7 @@ function ProfileListView({ onBack, onClose }: { onBack: () => void; onClose: () 
           label="Manage Profiles"
           onSelect={() => {
             onClose();
-            navigate({ to: MANAGE_PROFILES_PATH });
+            navigate({ to: "/settings/profiles" });
           }}
         />
       </List>

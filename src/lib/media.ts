@@ -19,3 +19,18 @@ export function useMediaRoot(): string | undefined {
 export function resolveMediaUrl(root: string, relativePath: string): string {
   return convertFileSrc(`${root}/${relativePath}`);
 }
+
+// ~/Relay itself, not the media subdirectory above -- wallpapers live in library_root/wallpapers,
+// a sibling of media/ (see commands::system::get_library_root_path's own doc comment).
+export function useLibraryRoot(): string | undefined {
+  const { data } = useQuery({
+    queryKey: ["library", "root"],
+    queryFn: () => invoke<string>("get_library_root_path"),
+    staleTime: Infinity,
+  });
+  return data;
+}
+
+export function resolveWallpaperUrl(libraryRoot: string, filename: string): string {
+  return resolveMediaUrl(libraryRoot, `wallpapers/${filename}`);
+}

@@ -5,11 +5,17 @@ import type { ReactNode } from "react";
 import {
   useActiveProfileId,
   useControllerType,
+  useRunAheadEnabled,
   useSetActiveProfileId,
   useSetControllerType,
+  useSetRunAheadEnabled,
   useSetSetting,
   useSetting,
+  useSetVideoScaleInteger,
+  useSetVideoSmooth,
   useSetWallpaper,
+  useVideoScaleInteger,
+  useVideoSmooth,
   useWallpaper,
   useWallpaperOptions,
   type GeneralSettings,
@@ -65,6 +71,9 @@ function generalSettings(overrides: Partial<GeneralSettings>): GeneralSettings {
     wallpaper: null,
     sound_volume: 70,
     rumble_enabled: true,
+    video_smooth: false,
+    video_scale_integer: true,
+    run_ahead_enabled: false,
     ...overrides,
   };
 }
@@ -177,6 +186,70 @@ describe("useControllerType / useSetControllerType", () => {
       controllerType: "playstation",
     });
     await waitFor(() => expect(result.current.controllerType).toBe("playstation"));
+  });
+});
+
+describe("video/runahead RetroArch preferences (REL-142)", () => {
+  it("defaults video_smooth=false, video_scale_integer=true, run_ahead_enabled=false and each setter round-trips", async () => {
+    let settings = generalSettings({});
+
+    invokeMock.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "get_general_settings") return Promise.resolve(settings);
+      if (cmd === "set_video_smooth") {
+        settings = { ...settings, video_smooth: args!.enabled as boolean };
+        return Promise.resolve(undefined);
+      }
+      if (cmd === "set_video_scale_integer") {
+        settings = { ...settings, video_scale_integer: args!.enabled as boolean };
+        return Promise.resolve(undefined);
+      }
+      if (cmd === "set_run_ahead_enabled") {
+        settings = { ...settings, run_ahead_enabled: args!.enabled as boolean };
+        return Promise.resolve(undefined);
+      }
+      throw new Error(`unexpected invoke: ${cmd}`);
+    });
+
+    const queryClient = new QueryClient();
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+
+    const { result } = renderHook(
+      () => ({
+        videoSmooth: useVideoSmooth(),
+        setVideoSmooth: useSetVideoSmooth(),
+        videoScaleInteger: useVideoScaleInteger(),
+        setVideoScaleInteger: useSetVideoScaleInteger(),
+        runAheadEnabled: useRunAheadEnabled(),
+        setRunAheadEnabled: useSetRunAheadEnabled(),
+      }),
+      { wrapper },
+    );
+
+    await waitFor(() => {
+      expect(result.current.videoSmooth).toBe(false);
+      expect(result.current.videoScaleInteger).toBe(true);
+      expect(result.current.runAheadEnabled).toBe(false);
+    });
+
+    await act(async () => {
+      await result.current.setVideoSmooth.mutateAsync(true);
+    });
+    expect(invokeMock).toHaveBeenCalledWith("set_video_smooth", { enabled: true });
+    await waitFor(() => expect(result.current.videoSmooth).toBe(true));
+
+    await act(async () => {
+      await result.current.setVideoScaleInteger.mutateAsync(false);
+    });
+    expect(invokeMock).toHaveBeenCalledWith("set_video_scale_integer", { enabled: false });
+    await waitFor(() => expect(result.current.videoScaleInteger).toBe(false));
+
+    await act(async () => {
+      await result.current.setRunAheadEnabled.mutateAsync(true);
+    });
+    expect(invokeMock).toHaveBeenCalledWith("set_run_ahead_enabled", { enabled: true });
+    await waitFor(() => expect(result.current.runAheadEnabled).toBe(true));
   });
 });
 
