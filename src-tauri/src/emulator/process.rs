@@ -118,6 +118,11 @@ pub fn kill(active_pid: &AtomicU32) -> Result<(), KillError> {
     if pid == 0 {
         return Err(KillError::NotRunning);
     }
+    // A process frozen by `pause_process` (SIGSTOP -- REL-147) ignores SIGTERM entirely until
+    // resumed, so Quit would otherwise leave it stuck rather than actually terminating it.
+    // SIGCONT first is a harmless no-op if the process wasn't stopped; any real failure (e.g. the
+    // pid no longer exists) surfaces from the SIGTERM call below instead, not this one.
+    unsafe { libc::kill(pid as libc::pid_t, libc::SIGCONT) };
     // SAFETY: libc::kill with a pid read from our own tracked child and a standard signal number
     // is safe to call; a pid that's already exited (a racing, already-cleared slot) just returns
     // ESRCH, surfaced as a normal Err rather than UB.
@@ -127,6 +132,52 @@ pub fn kill(active_pid: &AtomicU32) -> Result<(), KillError> {
     } else {
         Err(KillError::Signal(std::io::Error::last_os_error()))
     }
+}
+
+#[derive(Debug)]
+pub enum SignalError {
+    NotRunning,
+    Signal(std::io::Error),
+}
+
+impl std::fmt::Display for SignalError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotRunning => write!(f, "no game is currently running"),
+            Self::Signal(e) => write!(f, "failed to signal process: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for SignalError {}
+
+#[cfg(unix)]
+fn send_signal(active_pid: &AtomicU32, signal: libc::c_int) -> Result<(), SignalError> {
+    let pid = active_pid.load(Ordering::SeqCst);
+    if pid == 0 {
+        return Err(SignalError::NotRunning);
+    }
+    let result = unsafe { libc::kill(pid as libc::pid_t, signal) };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(SignalError::Signal(std::io::Error::last_os_error()))
+    }
+}
+
+/// Freezes a standalone-emulator process (PCSX2/Dolphin/yabause-qt) at the OS level via SIGSTOP --
+/// REL-147. These have no remote pause interface the way a RetroArch core does (see
+/// `retroarch_command::send_command("PAUSE_TOGGLE")`), so the quick menu falls back to stopping
+/// the whole process rather than leaving it running, unpaused, behind the menu.
+#[cfg(unix)]
+pub fn pause_process(active_pid: &AtomicU32) -> Result<(), SignalError> {
+    send_signal(active_pid, libc::SIGSTOP)
+}
+
+/// Resumes a process previously frozen by [`pause_process`], via SIGCONT.
+#[cfg(unix)]
+pub fn resume_process(active_pid: &AtomicU32) -> Result<(), SignalError> {
+    send_signal(active_pid, libc::SIGCONT)
 }
 
 /// Baseline emulator launch: spawn `command`/`args` via `tokio::process`, capture stdout/stderr
@@ -351,5 +402,71 @@ mod tests {
 
         assert_eq!(exit_result.unwrap().code(), Some(15));
         assert_eq!(active_pid.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn pause_process_returns_not_running_when_nothing_is_active() {
+        let active_pid = AtomicU32::new(0);
+        assert!(matches!(pause_process(&active_pid), Err(SignalError::NotRunning)));
+    }
+
+    #[tokio::test]
+    async fn pause_process_stops_a_running_process_and_resume_process_continues_it() {
+        let running = AtomicBool::new(false);
+        let active_pid = AtomicU32::new(0);
+
+        // Ticks a counter file every 50ms -- SIGSTOP can't be trapped or observed from inside the
+        // stopped process itself, so this proves whether the process is actually executing rather
+        // than just asserting the signal call itself returned Ok.
+        let dir = tempfile::tempdir().unwrap();
+        let ticks_path = dir.path().join("ticks");
+        let args = vec!["-c".to_string(), format!("while true; do echo t >> {}; sleep 0.05; done", ticks_path.display())];
+
+        let launch_fut = launch("sh", &args, &running, &active_pid, |_| {}, |_| {});
+        tokio::pin!(launch_fut);
+
+        let count_ticks = || std::fs::read_to_string(&ticks_path).map(|s| s.lines().count()).unwrap_or(0);
+
+        tokio::select! {
+            _ = &mut launch_fut => panic!("process exited before it was signaled"),
+            _ = tokio::time::sleep(std::time::Duration::from_millis(250)) => {}
+        }
+        let ticks_before_pause = count_ticks();
+        assert!(ticks_before_pause > 0, "process should have ticked at least once by now");
+
+        pause_process(&active_pid).unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        let ticks_while_paused = count_ticks();
+        assert_eq!(ticks_while_paused, ticks_before_pause, "no ticks should happen while stopped");
+
+        resume_process(&active_pid).unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        let ticks_after_resume = count_ticks();
+        assert!(ticks_after_resume > ticks_while_paused, "ticks should resume after SIGCONT");
+
+        kill(&active_pid).unwrap();
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(1), launch_fut).await;
+    }
+
+    #[tokio::test]
+    async fn kill_resumes_a_stopped_process_before_terminating_it() {
+        let running = AtomicBool::new(false);
+        let active_pid = AtomicU32::new(0);
+        let mut statuses = Vec::new();
+
+        // Without SIGCONT-before-SIGTERM in `kill`, this would hang forever -- a stopped process
+        // ignores SIGTERM entirely (queued, not delivered) until it's resumed.
+        let args = vec!["-c".to_string(), "trap 'exit 15' TERM; sleep 5".to_string()];
+        let (exit_result, _) = tokio::join!(
+            launch("sh", &args, &running, &active_pid, |s| statuses.push(s), |_| {}),
+            async {
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                pause_process(&active_pid).unwrap();
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                kill(&active_pid).unwrap();
+            },
+        );
+
+        assert_eq!(exit_result.unwrap().code(), Some(15));
     }
 }

@@ -99,3 +99,18 @@ export function useSaveStateGame() {
     mutationFn: () => invoke<void>("save_state_game"),
   });
 }
+
+// OS-level SIGSTOP/SIGCONT fallback for a standalone-emulator game (PCSX2/Dolphin/yabause-qt),
+// which has no remote command interface the way a RetroArch core does -- REL-147. The quick menu
+// picks between these and usePauseToggleGame based on the running game's system, never both.
+export function usePauseStandaloneGame() {
+  return useMutation({
+    mutationFn: () => invoke<void>("pause_standalone_game"),
+  });
+}
+
+export function useResumeStandaloneGame() {
+  return useMutation({
+    mutationFn: () => invoke<void>("resume_standalone_game"),
+  });
+}

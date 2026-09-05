@@ -55,6 +55,20 @@ pub async fn save_state_game() -> Result<(), String> {
     retroarch_command::send_command("SAVE_STATE").await.map_err(crate::logging::err_to_string)
 }
 
+/// Freezes a standalone-emulator process (PCSX2/Dolphin/yabause-qt) at the OS level -- REL-147.
+/// These have no remote command interface the way a RetroArch core does, so `pause_toggle_game`
+/// above is a silent no-op for them; the quick menu falls back to this instead so the game
+/// actually stops running behind the menu rather than continuing unpaused.
+#[tauri::command]
+pub fn pause_standalone_game(state: State<'_, LauncherState>) -> Result<(), String> {
+    process::pause_process(&state.active_pid).map_err(crate::logging::err_to_string)
+}
+
+#[tauri::command]
+pub fn resume_standalone_game(state: State<'_, LauncherState>) -> Result<(), String> {
+    process::resume_process(&state.active_pid).map_err(crate::logging::err_to_string)
+}
+
 #[tauri::command]
 pub async fn launch_game<R: tauri::Runtime>(
     app: AppHandle<R>,

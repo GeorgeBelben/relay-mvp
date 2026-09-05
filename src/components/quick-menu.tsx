@@ -3,7 +3,13 @@ import { Modal } from "./modal";
 import { List, ListRow } from "./list";
 import { AchievementsView } from "./achievements-view";
 import { useLaunchStore } from "@/lib/launch/store";
-import { useKillGame, usePauseToggleGame, useSaveStateGame } from "@/hooks/use-launcher";
+import {
+  useKillGame,
+  usePauseStandaloneGame,
+  usePauseToggleGame,
+  useResumeStandaloneGame,
+  useSaveStateGame,
+} from "@/hooks/use-launcher";
 import { useSystem } from "@/hooks/use-systems";
 import { useActiveProfileId } from "@/hooks/use-settings";
 import { useProfile } from "@/hooks/use-profiles";
@@ -22,20 +28,45 @@ export function QuickMenu() {
 
   const [view, setView] = useState<View>("menu");
 
+  // `game` is null before a launch (this mounts unconditionally at the root -- see the `if
+  // (!game) return null` guard below) -- useSystem's `enabled` gate skips the query rather than
+  // this needing its own conditional-hook workaround.
+  const system = useSystem(game?.system_id);
+  const isRetroarchCore = Boolean(system.data?.retroarch_core);
+
   const pauseToggle = usePauseToggleGame();
-  // Exactly one PAUSE_TOGGLE per real open<->close transition -- RetroArch's command is a toggle
-  // with no separate pause/unpause (see retroarch_command.rs), so firing it more than once per
-  // transition (e.g. on every render) would desync from the emulator's actual paused state. Mirrors
-  // modal.tsx's own "wasOpen" ref pattern for its open/close sound, for the same reason: only a
-  // real flip should trigger the side effect, not a re-render with the same `open` value.
+  // A standalone binary (PCSX2/Dolphin/yabause-qt) has no remote command interface the way a
+  // RetroArch core does -- pauseToggle would be a silent no-op for one, leaving it running,
+  // unpaused, behind the menu (REL-147). SIGSTOP/SIGCONT at the OS level is the fallback for
+  // those instead.
+  const pauseStandalone = usePauseStandaloneGame();
+  const resumeStandalone = useResumeStandaloneGame();
+
+  // Exactly one pause/resume per real open<->close transition -- RetroArch's PAUSE_TOGGLE command
+  // is a toggle with no separate pause/unpause (see retroarch_command.rs), so firing it more than
+  // once per transition (e.g. on every render) would desync from the emulator's actual paused
+  // state; SIGSTOP/SIGCONT aren't a toggle at all, so `open` picks which one directly rather than
+  // alternating. Mirrors modal.tsx's own "wasOpen" ref pattern for its open/close sound, for the
+  // same reason: only a real flip should trigger the side effect, not a re-render with the same
+  // `open` value. Guarded on `system.data` being loaded -- by the time a game is actually playing
+  // this is effectively always already cached, but guessing which mechanism applies would risk
+  // sending the wrong one instead of just skipping a single edge-case transition.
   const wasOpen = useRef(open);
   useEffect(() => {
-    if (wasOpen.current !== open) pauseToggle.mutate();
+    if (wasOpen.current !== open && system.data) {
+      if (isRetroarchCore) {
+        pauseToggle.mutate();
+      } else if (open) {
+        pauseStandalone.mutate();
+      } else {
+        resumeStandalone.mutate();
+      }
+    }
     wasOpen.current = open;
-    // pauseToggle is a fresh useMutation object every render -- only `open` should ever
+    // The mutation objects are fresh every render -- only `open`/`isRetroarchCore` should ever
     // retrigger this.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open, isRetroarchCore]);
 
   const close = () => {
     closeQuickMenu();
@@ -53,6 +84,7 @@ export function QuickMenu() {
       {view === "menu" && (
         <QuickMenuActions
           game={game}
+          isRetroarchCore={isRetroarchCore}
           onAchievements={() => setView("achievements")}
           onClose={close}
         />
@@ -64,19 +96,15 @@ export function QuickMenu() {
 
 function QuickMenuActions({
   game,
+  isRetroarchCore,
   onAchievements,
   onClose,
 }: {
   game: LibraryGame;
+  isRetroarchCore: boolean;
   onAchievements: () => void;
   onClose: () => void;
 }) {
-  const system = useSystem(game.system_id);
-  // Only a RetroArch-core system has a save-state command to send at all (see
-  // retroarch_command.rs) -- a standalone emulator (Dolphin/PCSX2/yabause-qt) has no such
-  // interface, so the row doesn't offer something that would silently do nothing.
-  const canSaveState = Boolean(system.data?.retroarch_core);
-
   const activeProfileId = useActiveProfileId();
   const activeProfile = useProfile(activeProfileId);
   // "if enabled": only offer the Achievements tab for a profile actually linked to
@@ -94,7 +122,7 @@ function QuickMenuActions({
       <h2 className="truncate px-4 pb-2 text-base font-semibold">{game.title}</h2>
       <List>
         {achievementsEnabled && <ListRow label="Achievements" onSelect={onAchievements} />}
-        {canSaveState && <ListRow label="Save State" onSelect={() => saveState.mutate()} />}
+        {isRetroarchCore && <ListRow label="Save State" onSelect={() => saveState.mutate()} />}
         <ListRow
           label="Quit to Relay"
           onSelect={() => {

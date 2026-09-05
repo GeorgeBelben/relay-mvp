@@ -85,6 +85,8 @@ pub fn run() {
             commands::emulator::kill_game,
             commands::emulator::get_launcher_status,
             commands::emulator::pause_toggle_game,
+            commands::emulator::pause_standalone_game,
+            commands::emulator::resume_standalone_game,
             commands::emulator::save_state_game,
             commands::games::list_games,
             commands::games::get_game,

@@ -21,9 +21,13 @@ export function useSystems() {
   });
 }
 
-export function useSystem(id: string) {
+// `id` is optional so a caller with a not-yet-known game (e.g. QuickMenu, mounted at the root
+// before a game is playing) can call this unconditionally rather than needing a separate guard --
+// `enabled` skips the query entirely until a real id shows up, instead of firing one for "".
+export function useSystem(id: string | undefined) {
   return useQuery({
     queryKey: [...systemsKey, id],
     queryFn: () => invoke<System | null>("get_system", { id }),
+    enabled: id != null,
   });
 }
