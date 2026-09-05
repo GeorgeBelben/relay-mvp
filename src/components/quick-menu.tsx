@@ -5,6 +5,7 @@ import { AchievementsView } from "./achievements-view";
 import { useLaunchStore } from "@/lib/launch/store";
 import {
   useKillGame,
+  useLoadStateGame,
   usePauseStandaloneGame,
   usePauseToggleGame,
   useResumeStandaloneGame,
@@ -122,6 +123,7 @@ function QuickMenuActions({
   );
 
   const saveState = useSaveStateGame();
+  const loadState = useLoadStateGame();
 
   return (
     <>
@@ -132,6 +134,7 @@ function QuickMenuActions({
         <ListRow label="Resume" onSelect={onResume} />
         {achievementsEnabled && <ListRow label="Achievements" onSelect={onAchievements} />}
         {isRetroarchCore && <ListRow label="Save State" onSelect={() => saveState.mutate()} />}
+        {isRetroarchCore && <ListRow label="Load State" onSelect={() => loadState.mutate()} />}
         {/* Killing the process is one row away, not immediate -- REL-148: a misclick or reflex
             press here used to lose unsaved progress with no way back. */}
         <ListRow label="Quit to Relay" onSelect={onConfirmQuit} />
