@@ -86,6 +86,7 @@ export function QuickMenu() {
         <QuickMenuActions
           game={game}
           isRetroarchCore={isRetroarchCore}
+          onResume={close}
           onAchievements={() => setView("achievements")}
           onConfirmQuit={() => setView("confirm-quit")}
         />
@@ -101,11 +102,13 @@ export function QuickMenu() {
 function QuickMenuActions({
   game,
   isRetroarchCore,
+  onResume,
   onAchievements,
   onConfirmQuit,
 }: {
   game: LibraryGame;
   isRetroarchCore: boolean;
+  onResume: () => void;
   onAchievements: () => void;
   onConfirmQuit: () => void;
 }) {
@@ -124,6 +127,9 @@ function QuickMenuActions({
     <>
       <h2 className="truncate px-4 pb-2 text-base font-semibold">{game.title}</h2>
       <List>
+        {/* First row, purely for discoverability -- the same "menu" button that opened this also
+            closes it, but that's not otherwise hinted anywhere on screen (REL-152). */}
+        <ListRow label="Resume" onSelect={onResume} />
         {achievementsEnabled && <ListRow label="Achievements" onSelect={onAchievements} />}
         {isRetroarchCore && <ListRow label="Save State" onSelect={() => saveState.mutate()} />}
         {/* Killing the process is one row away, not immediate -- REL-148: a misclick or reflex
