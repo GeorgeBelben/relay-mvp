@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Modal } from "./modal";
 import { List, ListRow } from "./list";
 import { AchievementsView } from "./achievements-view";
+import { VolumeSlider } from "./volume-slider";
 import { useLaunchStore } from "@/lib/launch/store";
 import {
   useKillGame,
@@ -177,6 +178,12 @@ function QuickMenuActions({
         {isRetroarchCore && <ListRow label="Restart" onSelect={onConfirmRestart} />}
         <ListRow label="Quit to Relay" onSelect={onConfirmQuit} />
       </List>
+      {/* Same focusKey as Settings > UI's own VolumeSlider (REL-151) -- fine since the two are
+          never mounted/focused at once (Settings isn't reachable while a game is playing), and
+          this reuses the exact same control rather than a bespoke compact copy of it. */}
+      <div className="mt-1">
+        <VolumeSlider />
+      </div>
     </>
   );
 }
