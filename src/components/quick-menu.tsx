@@ -13,9 +13,10 @@ import {
 import { useSystem } from "@/hooks/use-systems";
 import { useActiveProfileId } from "@/hooks/use-settings";
 import { useProfile } from "@/hooks/use-profiles";
+import { FocusContext, useBackHandler, useFocusable } from "@/lib/focus";
 import type { LibraryGame } from "@/hooks/use-library";
 
-type View = "menu" | "achievements";
+type View = "menu" | "achievements" | "confirm-quit";
 
 // Home-button quick menu (REL-23): opened by useQuickMenuListener while a game is playing.
 // Mounted once at the app root (see __root.tsx) -- reads the active game straight off
@@ -86,10 +87,13 @@ export function QuickMenu() {
           game={game}
           isRetroarchCore={isRetroarchCore}
           onAchievements={() => setView("achievements")}
-          onClose={close}
+          onConfirmQuit={() => setView("confirm-quit")}
         />
       )}
       {view === "achievements" && <AchievementsView game={game} onBack={() => setView("menu")} />}
+      {view === "confirm-quit" && (
+        <ConfirmQuitView onBack={() => setView("menu")} onClose={close} />
+      )}
     </Modal>
   );
 }
@@ -98,12 +102,12 @@ function QuickMenuActions({
   game,
   isRetroarchCore,
   onAchievements,
-  onClose,
+  onConfirmQuit,
 }: {
   game: LibraryGame;
   isRetroarchCore: boolean;
   onAchievements: () => void;
-  onClose: () => void;
+  onConfirmQuit: () => void;
 }) {
   const activeProfileId = useActiveProfileId();
   const activeProfile = useProfile(activeProfileId);
@@ -115,7 +119,6 @@ function QuickMenuActions({
   );
 
   const saveState = useSaveStateGame();
-  const killGame = useKillGame();
 
   return (
     <>
@@ -123,18 +126,54 @@ function QuickMenuActions({
       <List>
         {achievementsEnabled && <ListRow label="Achievements" onSelect={onAchievements} />}
         {isRetroarchCore && <ListRow label="Save State" onSelect={() => saveState.mutate()} />}
-        <ListRow
-          label="Quit to Relay"
-          onSelect={() => {
-            // Optimistic close -- the real "exited" launcher-status push (once the killed
-            // process actually exits) resets the launch store fully too (see
-            // useLauncherListener.ts's dismiss()), but there's no reason to wait for that
-            // round-trip just to close this menu.
-            onClose();
-            killGame.mutate();
-          }}
-        />
+        {/* Killing the process is one row away, not immediate -- REL-148: a misclick or reflex
+            press here used to lose unsaved progress with no way back. */}
+        <ListRow label="Quit to Relay" onSelect={onConfirmQuit} />
       </List>
     </>
+  );
+}
+
+// Own sub-view rather than an inline conditional inside QuickMenuActions -- same reasoning as
+// AchievementsView: a distinct focus subtree needs its own FocusContext + focusSelf() so the
+// gamepad lands on it rather than wherever focus was left in the previous view.
+function ConfirmQuitView({ onBack, onClose }: { onBack: () => void; onClose: () => void }) {
+  useBackHandler(onBack);
+  const killGame = useKillGame();
+
+  const { ref, focusKey, focusSelf } = useFocusable({
+    trackChildren: true,
+    saveLastFocusedChild: true,
+  });
+  useEffect(() => {
+    focusSelf();
+    // Mount-only -- nothing async to wait for here, unlike AchievementsView's own focusSelf
+    // effect keyed on its data arriving.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <FocusContext.Provider value={focusKey}>
+      <div ref={ref}>
+        <h2 className="px-4 pb-2 text-base font-semibold">Quit without saving?</h2>
+        <p className="px-4 pb-3 text-sm text-muted-foreground">
+          Any progress since your last save will be lost.
+        </p>
+        <List>
+          <ListRow
+            label="Quit to Relay"
+            onSelect={() => {
+              // Optimistic close -- the real "exited" launcher-status push (once the killed
+              // process actually exits) resets the launch store fully too (see
+              // useLauncherListener.ts's dismiss()), but there's no reason to wait for that
+              // round-trip just to close this menu.
+              onClose();
+              killGame.mutate();
+            }}
+          />
+          <ListRow label="Back" onSelect={onBack} />
+        </List>
+      </div>
+    </FocusContext.Provider>
   );
 }
