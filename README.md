@@ -15,9 +15,9 @@ This is a **ground-up rewrite** of the original Electron MVP using **Tauri v2 + 
 | Backend | Rust — single crate, modules (`db`, `ingestion`, `emulator`, `commands`) |
 | Database | SQLite via `sqlx` |
 | Emulator management | `tokio::process` |
-| Metadata sources | IGDB, ScreenScraper |
+| Metadata sources | SteamGridDB |
 | Kiosk / display | cage (Wayland compositor), Plymouth boot theme |
-| Host | Beelink mini PC, Ubuntu Server, systemd-managed |
+| Host | HP EliteDesk 800 G3 Desktop Mini (35W, Intel iGPU), Ubuntu Server, systemd-managed |
 
 ## Architecture at a glance
 
@@ -82,4 +82,4 @@ See the Phase 5 (System Integration) issues in Linear for setup details.
 
 ## Project status
 
-This is a personal project, developed incrementally: a thin vertical slice first, then features layered in phase by phase, dogfooded on the actual Beelink hardware as it goes. See the `Tauri Rewrite` project in Linear for the full phase breakdown and current status.
+This is a personal project, developed incrementally: a thin vertical slice first, then features layered in phase by phase, dogfooded on the actual EliteDesk hardware as it goes. See the `Tauri Rewrite` project in Linear for the full phase breakdown and current status.

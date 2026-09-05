@@ -4,7 +4,7 @@ Guidance for Claude Code when working in this repository.
 
 ## What this project is
 
-Relay is a custom emulation console: a kiosk app that ingests a ROM library (scan/probe/identify/enrich), then launches emulators (RetroArch/PCSX2/Dolphin) to play games. It runs on a Beelink mini PC under Ubuntu Server + cage (Wayland kiosk compositor).
+Relay is a custom emulation console: a kiosk app that ingests a ROM library (scan/probe/identify/enrich), then launches emulators (RetroArch/PCSX2/Dolphin) to play games. It runs on an HP EliteDesk 800 G3 Desktop Mini (35W TDP, Intel iGPU) under Ubuntu Server + cage (Wayland kiosk compositor).
 
 This repo is a **ground-up rewrite** from Electron to **Tauri v2 + Rust**, with React retained for the UI. The previous Electron MVP is a separate, archived codebase — do not assume its patterns carry over 1:1; several deliberately don't (see Decisions below).
 
