@@ -60,6 +60,11 @@ pub async fn load_state_game() -> Result<(), String> {
     retroarch_command::send_command("LOAD_STATE").await.map_err(crate::logging::err_to_string)
 }
 
+#[tauri::command]
+pub async fn reset_game() -> Result<(), String> {
+    retroarch_command::send_command("RESET").await.map_err(crate::logging::err_to_string)
+}
+
 /// Freezes a standalone-emulator process (PCSX2/Dolphin/yabause-qt) at the OS level -- REL-147.
 /// These have no remote command interface the way a RetroArch core does, so `pause_toggle_game`
 /// above is a silent no-op for them; the quick menu falls back to this instead so the game

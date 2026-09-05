@@ -8,6 +8,7 @@ import {
   useLoadStateGame,
   usePauseStandaloneGame,
   usePauseToggleGame,
+  useResetGame,
   useResumeStandaloneGame,
   useSaveStateGame,
 } from "@/hooks/use-launcher";
@@ -17,7 +18,7 @@ import { useProfile } from "@/hooks/use-profiles";
 import { FocusContext, useBackHandler, useFocusable } from "@/lib/focus";
 import type { LibraryGame } from "@/hooks/use-library";
 
-type View = "menu" | "achievements" | "confirm-quit";
+type View = "menu" | "achievements" | "confirm-quit" | "confirm-restart";
 
 // Home-button quick menu (REL-23): opened by useQuickMenuListener while a game is playing.
 // Mounted once at the app root (see __root.tsx) -- reads the active game straight off
@@ -77,6 +78,12 @@ export function QuickMenu() {
     setTimeout(() => setView("menu"), 200);
   };
 
+  // Both destructive (lose progress since the last save) and both confirmed the same way
+  // (REL-148/REL-150) -- owned here rather than inside their own confirm sub-view, since the
+  // relevant mutation differs per action but the confirm UI itself doesn't.
+  const killGame = useKillGame();
+  const resetGame = useResetGame();
+
   // No game yet (shouldn't normally render before a launch, but keeps this safe to mount
   // unconditionally at the root rather than needing a guard at the call site).
   if (!game) return null;
@@ -90,11 +97,37 @@ export function QuickMenu() {
           onResume={close}
           onAchievements={() => setView("achievements")}
           onConfirmQuit={() => setView("confirm-quit")}
+          onConfirmRestart={() => setView("confirm-restart")}
         />
       )}
       {view === "achievements" && <AchievementsView game={game} onBack={() => setView("menu")} />}
       {view === "confirm-quit" && (
-        <ConfirmQuitView onBack={() => setView("menu")} onClose={close} />
+        <ConfirmActionView
+          title="Quit without saving?"
+          description="Any progress since your last save will be lost."
+          confirmLabel="Quit to Relay"
+          onBack={() => setView("menu")}
+          onConfirm={() => {
+            // Optimistic close -- the real "exited" launcher-status push (once the killed
+            // process actually exits) resets the launch store fully too (see
+            // useLauncherListener.ts's dismiss()), but there's no reason to wait for that
+            // round-trip just to close this menu.
+            close();
+            killGame.mutate();
+          }}
+        />
+      )}
+      {view === "confirm-restart" && (
+        <ConfirmActionView
+          title="Restart without saving?"
+          description="Any progress since your last save will be lost."
+          confirmLabel="Restart"
+          onBack={() => setView("menu")}
+          onConfirm={() => {
+            resetGame.mutate();
+            close();
+          }}
+        />
       )}
     </Modal>
   );
@@ -106,12 +139,14 @@ function QuickMenuActions({
   onResume,
   onAchievements,
   onConfirmQuit,
+  onConfirmRestart,
 }: {
   game: LibraryGame;
   isRetroarchCore: boolean;
   onResume: () => void;
   onAchievements: () => void;
   onConfirmQuit: () => void;
+  onConfirmRestart: () => void;
 }) {
   const activeProfileId = useActiveProfileId();
   const activeProfile = useProfile(activeProfileId);
@@ -135,8 +170,11 @@ function QuickMenuActions({
         {achievementsEnabled && <ListRow label="Achievements" onSelect={onAchievements} />}
         {isRetroarchCore && <ListRow label="Save State" onSelect={() => saveState.mutate()} />}
         {isRetroarchCore && <ListRow label="Load State" onSelect={() => loadState.mutate()} />}
-        {/* Killing the process is one row away, not immediate -- REL-148: a misclick or reflex
-            press here used to lose unsaved progress with no way back. */}
+        {/* Restart/Quit both go through a confirm step first (REL-148/REL-150) rather than firing
+            immediately -- both lose progress since the last save, and a misclick or reflex press
+            here used to have no way back. Restart is RetroArch-core only: PCSX2/Dolphin/yabause-qt
+            have no equivalent remote-reset interface (same reasoning as Save/Load State above). */}
+        {isRetroarchCore && <ListRow label="Restart" onSelect={onConfirmRestart} />}
         <ListRow label="Quit to Relay" onSelect={onConfirmQuit} />
       </List>
     </>
@@ -145,10 +183,23 @@ function QuickMenuActions({
 
 // Own sub-view rather than an inline conditional inside QuickMenuActions -- same reasoning as
 // AchievementsView: a distinct focus subtree needs its own FocusContext + focusSelf() so the
-// gamepad lands on it rather than wherever focus was left in the previous view.
-function ConfirmQuitView({ onBack, onClose }: { onBack: () => void; onClose: () => void }) {
+// gamepad lands on it rather than wherever focus was left in the previous view. Shared by both
+// Quit and Restart (REL-148/REL-150) -- same confirm shape, only the copy and the mutation that
+// fires differ, which the caller supplies rather than this needing to know about either action.
+function ConfirmActionView({
+  title,
+  description,
+  confirmLabel,
+  onConfirm,
+  onBack,
+}: {
+  title: string;
+  description: string;
+  confirmLabel: string;
+  onConfirm: () => void;
+  onBack: () => void;
+}) {
   useBackHandler(onBack);
-  const killGame = useKillGame();
 
   const { ref, focusKey, focusSelf } = useFocusable({
     trackChildren: true,
@@ -164,22 +215,10 @@ function ConfirmQuitView({ onBack, onClose }: { onBack: () => void; onClose: () 
   return (
     <FocusContext.Provider value={focusKey}>
       <div ref={ref}>
-        <h2 className="px-4 pb-2 text-base font-semibold">Quit without saving?</h2>
-        <p className="px-4 pb-3 text-sm text-muted-foreground">
-          Any progress since your last save will be lost.
-        </p>
+        <h2 className="px-4 pb-2 text-base font-semibold">{title}</h2>
+        <p className="px-4 pb-3 text-sm text-muted-foreground">{description}</p>
         <List>
-          <ListRow
-            label="Quit to Relay"
-            onSelect={() => {
-              // Optimistic close -- the real "exited" launcher-status push (once the killed
-              // process actually exits) resets the launch store fully too (see
-              // useLauncherListener.ts's dismiss()), but there's no reason to wait for that
-              // round-trip just to close this menu.
-              onClose();
-              killGame.mutate();
-            }}
-          />
+          <ListRow label={confirmLabel} onSelect={onConfirm} />
           <ListRow label="Back" onSelect={onBack} />
         </List>
       </div>

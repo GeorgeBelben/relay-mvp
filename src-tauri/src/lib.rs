@@ -89,6 +89,7 @@ pub fn run() {
             commands::emulator::resume_standalone_game,
             commands::emulator::save_state_game,
             commands::emulator::load_state_game,
+            commands::emulator::reset_game,
             commands::games::list_games,
             commands::games::get_game,
             commands::games::create_game,
