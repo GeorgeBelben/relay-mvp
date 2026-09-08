@@ -23,6 +23,7 @@ libc = "0.2"
 
 [dev-dependencies]
 tempfile = "3.27.0"
+wiremock = "0.6.5"
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 toml = "1.1.5"

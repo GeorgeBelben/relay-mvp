@@ -2,6 +2,7 @@ pub mod db;
 pub mod emulator;
 pub mod init;
 pub mod library;
+pub mod retroachievements;
 pub mod scan;
 pub mod secrets;
 pub mod storage;
