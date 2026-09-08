@@ -160,14 +160,19 @@ async fn scan(report: &relay_core::init::Report) -> Result<(), String> {
 
 async fn games(report: &relay_core::init::Report) -> Result<(), String> {
     let games = relay_core::db::games::list(&report.pool).await.map_err(|err| format!("couldn't list games: {err}"))?;
+    let roms = relay_core::db::roms::list(&report.pool).await.map_err(|err| format!("couldn't list roms: {err}"))?;
 
     println!("{} game(s):", games.len());
     for game in &games {
         // RetroAchievements is what actually identifies a game (exact hash match); SteamGridDB
         // only ever fetches optional box art, independent of identification.
-        let identified = if game.retroachievements_game_id.is_some() { "" } else { " (not yet identified)" };
-        let art = if game.steamgriddb_id.is_some() { " [art]" } else { "" };
-        println!("  {} [{}]{}{}", game.title, game.id, identified, art);
+        let identified = if game.retroachievements_game_id.is_some() { "✅" } else { "❌" };
+        let art = if game.steamgriddb_id.is_some() { " 🖼️" } else { "" };
+        let missing = match roms.iter().find(|rom| rom.id == game.rom_id) {
+            Some(rom) if rom.status == "missing" => " ⚠️",
+            _ => "",
+        };
+        println!("  {identified}{art}{missing}  {} [{}]", game.title, game.id);
     }
 
     Ok(())
