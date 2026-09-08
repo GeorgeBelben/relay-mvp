@@ -73,6 +73,8 @@ enum ProfilesAction {
     List,
     /// Create a new profile
     Create { name: String },
+    /// Delete a profile by id (see `relay profiles list`)
+    Delete { id: String },
 }
 
 #[derive(Subcommand)]
@@ -182,6 +184,10 @@ async fn profiles(report: &relay_core::init::Report, action: ProfilesAction) -> 
         ProfilesAction::Create { name } => {
             let profile = relay_core::db::profiles::create(&report.pool, &name).await.map_err(|err| format!("couldn't create profile: {err}"))?;
             println!("Created profile \"{}\" ({})", profile.name, profile.id);
+        }
+        ProfilesAction::Delete { id } => {
+            relay_core::db::profiles::delete(&report.pool, &id).await.map_err(|err| format!("couldn't delete profile: {err}"))?;
+            println!("Deleted profile {id}");
         }
     }
     Ok(())
