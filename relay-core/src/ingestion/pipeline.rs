@@ -188,6 +188,27 @@ async fn run_rescan(
     Ok(())
 }
 
+/// Convenience wrapper around `rescan` that resolves its two optional collaborators (a SteamGridDB
+/// client, the No-Intro DAT cache) from Settings/a cache dir, rather than requiring every caller
+/// to do that resolution itself. This is the piece relay-ui's Tauri `rescan_library` command used
+/// to do inline (`rescan_library_at`), redesigned to take plain parameters and a callback instead
+/// of an AppHandle/Emitter/State -- a Tauri command wraps `on_status` in `app.emit` and stores
+/// `running`/status in Tauri state; a CLI invocation can just print it and use a fresh `running`.
+pub async fn rescan_from_settings(
+    pool: &SqlitePool,
+    roms_root: &Path,
+    media_root: &Path,
+    dats_cache_dir: &Path,
+    running: &AtomicBool,
+    on_status: impl FnMut(ScanStatus),
+) -> Result<(), PipelineError> {
+    let api_key = crate::db::settings::get(pool, "steamgriddbApiKey").await?;
+    let client = api_key.map(SteamGridDbClient::new);
+    let no_intro = NoIntroDatLookup::new(dats_cache_dir.to_path_buf());
+
+    rescan(pool, roms_root, media_root, &no_intro, client.as_ref(), running, on_status).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -334,5 +355,27 @@ mod tests {
 
         assert!(statuses.is_empty());
         assert!(games::list(&pool).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn rescan_from_settings_resolves_collaborators_and_reports_progress() {
+        let (pool, _db_dir) = throwaway_pool().await;
+
+        let roms_root = tempfile::tempdir().unwrap();
+        fs::create_dir(roms_root.path().join("snes")).unwrap();
+        fs::write(roms_root.path().join("snes/game.sfc"), b"data").unwrap();
+        let media_root = tempfile::tempdir().unwrap();
+        let dats_cache_dir = tempfile::tempdir().unwrap();
+
+        // No steamgriddbApiKey setting configured -- resolves to no client, enrichment skipped.
+        let running = AtomicBool::new(false);
+        let mut statuses = Vec::new();
+        rescan_from_settings(&pool, roms_root.path(), media_root.path(), dats_cache_dir.path(), &running, |s| statuses.push(s))
+            .await
+            .unwrap();
+
+        assert_eq!(statuses, vec![ScanStatus::ScanningFiles, ScanStatus::Done]);
+        let game = &games::list(&pool).await.unwrap()[0];
+        assert!(game.enriched_at.is_none());
     }
 }
