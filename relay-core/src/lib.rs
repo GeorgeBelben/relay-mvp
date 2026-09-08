@@ -1,4 +1,5 @@
 pub mod db;
+pub mod emulator;
 pub mod init;
 pub mod library;
 pub mod scan;
