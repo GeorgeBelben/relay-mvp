@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Runs on the dev Mac. Triggers the build-dev.yml workflow, waits for it, downloads
-# the resulting relay-cli binary, and hands it to install-on-device.sh over SSH.
+# the resulting relay binary, and hands it to install-on-device.sh over SSH.
 #
 # relay.local is x86_64 Ubuntu with no Rust toolchain, no `gh`, and no passwordless
 # sudo -- building on GitHub's ubuntu-latest runner sidesteps cross-compiling from
@@ -40,13 +40,13 @@ gh run watch "$RUN_ID" --repo "$REPO" --exit-status
 echo "Build succeeded. Downloading artifact..."
 TMP_DIR=$(mktemp -d)
 trap 'rm -rf "$TMP_DIR"' EXIT
-gh run download "$RUN_ID" --repo "$REPO" --name relay-cli --dir "$TMP_DIR"
+gh run download "$RUN_ID" --repo "$REPO" --name relay --dir "$TMP_DIR"
 
-BIN="$TMP_DIR/relay-cli"
+BIN="$TMP_DIR/relay"
 chmod +x "$BIN"
 
 echo "Copying to $DEVICE..."
-scp "$BIN" "$DEVICE:/tmp/relay-cli"
+scp "$BIN" "$DEVICE:/tmp/relay"
 
 echo "Installing on $DEVICE..."
 ssh "$DEVICE" 'bash -s' < "$SCRIPT_DIR/install-on-device.sh"

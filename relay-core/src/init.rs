@@ -33,6 +33,9 @@ pub async fn ensure_environment() -> Result<Report, InitError> {
     let migrator = sqlx::migrate!("./migrations");
     migrator.run(&pool).await?;
 
+    let library_root = crate::library::library_root();
+    crate::library::ensure_library_dirs(&library_root).await?;
+
     Ok(Report {
         data_dir,
         migrations_run: migrator.migrations.len() as u32,

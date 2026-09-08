@@ -5,8 +5,9 @@
 set -euo pipefail
 
 mkdir -p "$HOME/.local/bin"
-mv /tmp/relay-cli "$HOME/.local/bin/relay-cli"
-chmod +x "$HOME/.local/bin/relay-cli"
+rm -f "$HOME/.local/bin/relay-cli"
+mv /tmp/relay "$HOME/.local/bin/relay"
+chmod +x "$HOME/.local/bin/relay"
 
-echo "Installed to $HOME/.local/bin/relay-cli"
-"$HOME/.local/bin/relay-cli"
+echo "Installed to $HOME/.local/bin/relay"
+"$HOME/.local/bin/relay" --help

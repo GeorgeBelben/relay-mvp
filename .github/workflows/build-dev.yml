@@ -1,7 +1,7 @@
 name: Build Dev
 
 # Manually-triggered build for on-device testing (see scripts/deploy.sh). Produces a
-# relay-cli binary artifact without cutting a version tag / release.
+# relay binary artifact without cutting a version tag / release.
 on:
   workflow_dispatch:
 
@@ -22,6 +22,6 @@ jobs:
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
-          name: relay-cli
-          path: target/release/relay-cli
+          name: relay
+          path: target/release/relay
           retention-days: 7
