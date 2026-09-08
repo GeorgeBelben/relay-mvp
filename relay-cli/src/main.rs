@@ -21,6 +21,32 @@ enum Commands {
     Storage,
     /// Check the environment (data dir, database, migrations) and report its state
     Doctor,
+    /// Manage local user profiles
+    Profiles {
+        #[command(subcommand)]
+        action: ProfilesAction,
+    },
+    /// Read or write app settings
+    Config {
+        #[command(subcommand)]
+        action: ConfigAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum ProfilesAction {
+    /// List all profiles
+    List,
+    /// Create a new profile
+    Create { name: String },
+}
+
+#[derive(Subcommand)]
+enum ConfigAction {
+    /// Read a setting's raw value
+    Get { key: String },
+    /// Write a setting's raw value
+    Set { key: String, value: String },
 }
 
 #[tokio::main]
@@ -39,6 +65,8 @@ async fn main() {
         Commands::Systems => systems(),
         Commands::Storage => storage().await,
         Commands::Doctor => doctor(&report),
+        Commands::Profiles { action } => profiles(&report, action).await,
+        Commands::Config { action } => config(&report, action).await,
     };
 
     if let Err(err) = result {
@@ -101,5 +129,37 @@ fn doctor(report: &relay_core::init::Report) -> Result<(), String> {
     println!("library root:   {}", relay_core::library::library_root().display());
     println!("migrations run: {}", report.migrations_run);
     println!("environment looks healthy.");
+    Ok(())
+}
+
+async fn profiles(report: &relay_core::init::Report, action: ProfilesAction) -> Result<(), String> {
+    match action {
+        ProfilesAction::List => {
+            let profiles = relay_core::db::profiles::list(&report.pool).await.map_err(|err| format!("couldn't list profiles: {err}"))?;
+            println!("{} profile(s):", profiles.len());
+            for profile in profiles {
+                let summary: relay_core::db::profiles::ProfileSummary = profile.into();
+                println!("  {} ({})", summary.name, summary.id);
+            }
+        }
+        ProfilesAction::Create { name } => {
+            let profile = relay_core::db::profiles::create(&report.pool, &name).await.map_err(|err| format!("couldn't create profile: {err}"))?;
+            println!("Created profile \"{}\" ({})", profile.name, profile.id);
+        }
+    }
+    Ok(())
+}
+
+async fn config(report: &relay_core::init::Report, action: ConfigAction) -> Result<(), String> {
+    match action {
+        ConfigAction::Get { key } => match relay_core::db::settings::get(&report.pool, &key).await.map_err(|err| format!("couldn't read setting: {err}"))? {
+            Some(value) => println!("{value}"),
+            None => println!("(not set)"),
+        },
+        ConfigAction::Set { key, value } => {
+            relay_core::db::settings::set(&report.pool, &key, &value).await.map_err(|err| format!("couldn't write setting: {err}"))?;
+            println!("Set {key} = {value}");
+        }
+    }
     Ok(())
 }
