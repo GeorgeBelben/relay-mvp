@@ -18,9 +18,7 @@ async fn main() {
     let cli = Cli::parse();
 
     match relay_core::init::ensure_environment().await {
-        Ok(report) => {
-            println!("relay is ready: {:?}", report);
-        }
+        Ok(_) => {}
         Err(err) => {
             eprintln!("startup failed: {err}");
             std::process::exit(1);
@@ -31,7 +29,11 @@ async fn main() {
         Commands::Scan => {
             match relay_core::scan::scan_library(&relay_core::library::library_root()) {
                 Ok(report) => {
-                    println!("scan complete: {:?}", report);
+                    println!("Found {} rom(s):", report.roms.len());
+                    for rom in &report.roms {
+                        let name = rom.path.file_stem().and_then(|s| s.to_str()).unwrap_or("?");
+                        println!("  [{}] {}", rom.system_id, name);
+                    }
                 }
                 Err(err) => {
                     eprintln!("scan failed: {err}");
