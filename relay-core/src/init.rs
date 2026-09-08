@@ -4,6 +4,7 @@ use thiserror::Error;
 pub struct Report {
     pub data_dir: std::path::PathBuf,
     pub migrations_run: u32,
+    pub pool: sqlx::SqlitePool,
 }
 
 #[derive(Debug, Error)]
@@ -39,5 +40,6 @@ pub async fn ensure_environment() -> Result<Report, InitError> {
     Ok(Report {
         data_dir,
         migrations_run: migrator.migrations.len() as u32,
+        pool,
     })
 }
