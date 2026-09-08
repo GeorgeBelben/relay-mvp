@@ -3673,6 +3673,7 @@ dependencies = [
  "nanoid",
  "nix",
  "regex",
+ "relay-core",
  "reqwest",
  "serde",
  "serde_json",
