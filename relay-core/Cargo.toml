@@ -8,3 +8,4 @@ sqlx = { version = "0.9", features = ["sqlite", "runtime-tokio", "macros"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs"] }
 dirs = "6"
 thiserror = "2"
+walkdir = "2.5.0"

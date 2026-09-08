@@ -11,3 +11,4 @@ path = "src/main.rs"
 relay-core = { path = "../relay-core" }
 clap = { version = "4", features = ["derive"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+indicatif = "0.18.6"

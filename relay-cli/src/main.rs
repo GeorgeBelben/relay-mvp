@@ -9,8 +9,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Check the data directory and database, creating/migrating as needed
-    Init,
+    /// Scan the ROM library and report what was found
+    Scan,
 }
 
 #[tokio::main]
@@ -28,9 +28,16 @@ async fn main() {
     }
 
     match cli.command {
-        Commands::Init => {
-            // ensure_environment already ran above, unconditionally, for every
-            // command -- `relay init` just makes that explicit for the user.
+        Commands::Scan => {
+            match relay_core::scan::scan_library(&relay_core::library::library_root()) {
+                Ok(report) => {
+                    println!("scan complete: {:?}", report);
+                }
+                Err(err) => {
+                    eprintln!("scan failed: {err}");
+                    std::process::exit(1);
+                }
+            }
         }
     }
 }
