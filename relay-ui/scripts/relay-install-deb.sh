@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Installed on the device at /usr/local/sbin/relay-install-deb.sh, owned by root.
+# Wrapping dpkg -i in a fixed-path script (rather than a sudoers wildcard rule)
+# avoids the "wildcards are not allowed in command arguments" sudoers restriction.
+set -euo pipefail
+
+DEB=$(find /opt/relay/incoming -maxdepth 1 -name '*.deb' | head -1)
+if [ -z "$DEB" ]; then
+  echo "No .deb found in /opt/relay/incoming" >&2
+  exit 1
+fi
+
+# `apt install ./file.deb` doesn't reliably resolve local-file dependencies on this
+# system (apt reports them as "not going to be installed" despite valid candidates).
+# dpkg -i followed by apt --fix-broken install is the standard robust recipe instead.
+dpkg -i "$DEB" || true
+apt-get install -f -y
+
+CURSOR_THEME=/opt/relay/incoming/cursor-theme/relay-blank
+if [ -d "$CURSOR_THEME" ]; then
+  rm -rf /usr/share/icons/relay-blank
+  cp -r "$CURSOR_THEME" /usr/share/icons/relay-blank
+fi
+
+SERVICE=/opt/relay/incoming/relay.service
+if [ -f "$SERVICE" ]; then
+  cp "$SERVICE" /etc/systemd/system/relay.service
+  systemctl daemon-reload
+  systemctl enable relay.service
+  systemctl restart relay.service
+fi

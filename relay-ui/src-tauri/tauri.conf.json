@@ -1,0 +1,54 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Relay",
+  "version": "0.1.0",
+  "identifier": "com.georgebelben.relay",
+  "build": {
+    "beforeDevCommand": "bun run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "bun run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Relay",
+        "fullscreen": false,
+        "decorations": false,
+        "visible": false,
+        "backgroundColor": "#111111"
+      }
+    ],
+    "security": {
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": [
+          "$HOME/Relay/**"
+        ]
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "deb"
+    ],
+    "createUpdaterArtifacts": true,
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEFCRkQ0RTAxMkU0RDE3QjMKUldTekYwMHVBVTc5cTJIK0FVM2IwYU5MTzBlYkkwVi9ONnVCd1NWbnJMYWx1QnVxZjBMTk91VEwK",
+      "endpoints": [
+        "https://github.com/GeorgeBelben/relay/releases/latest/download/latest.json"
+      ]
+    }
+  }
+}

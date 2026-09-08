@@ -1,0 +1,215 @@
+import { describe, expect, it, vi } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, renderHook, waitFor } from "@testing-library/react";
+import type { ReactNode } from "react";
+import {
+  useActiveProfileId,
+  useControllerType,
+  useRunAheadEnabled,
+  useSetActiveProfileId,
+  useSetControllerType,
+  useSetRunAheadEnabled,
+  useSetSetting,
+  useSetting,
+  useSetVideoScaleInteger,
+  useSetVideoSmooth,
+  useVideoScaleInteger,
+  useVideoSmooth,
+  type GeneralSettings,
+} from "./use-settings";
+
+const invokeMock = vi.fn();
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: (...args: unknown[]) => invokeMock(...args),
+}));
+
+describe("useSetting cache invalidation", () => {
+  it("refetches the setting after a mutation invalidates it", async () => {
+    let value: string | null = null;
+
+    invokeMock.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "get_setting") return Promise.resolve(value);
+      if (cmd === "set_setting") {
+        value = args!.value as string;
+        return Promise.resolve(undefined);
+      }
+      throw new Error(`unexpected invoke: ${cmd}`);
+    });
+
+    const queryClient = new QueryClient();
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+
+    const { result } = renderHook(
+      () => ({
+        setting: useSetting("steamgriddbApiKey"),
+        setSetting: useSetSetting("steamgriddbApiKey"),
+      }),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(result.current.setting.data).toBeNull());
+
+    await act(async () => {
+      await result.current.setSetting.mutateAsync("abc123");
+    });
+
+    await waitFor(() => expect(result.current.setting.data).toBe("abc123"));
+  });
+});
+
+function generalSettings(overrides: Partial<GeneralSettings>): GeneralSettings {
+  return {
+    onboarding_completed: false,
+    controller_type: "xbox",
+    active_profile_id: null,
+    retroarch_cores_path: "/usr/lib/x86_64-linux-gnu/libretro",
+    sound_volume: 70,
+    rumble_enabled: true,
+    video_smooth: false,
+    video_scale_integer: true,
+    run_ahead_enabled: false,
+    ...overrides,
+  };
+}
+
+describe("useControllerType / useSetControllerType", () => {
+  it("defaults to xbox and updates via set_controller_type", async () => {
+    let settings = generalSettings({});
+
+    invokeMock.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "get_general_settings") return Promise.resolve(settings);
+      if (cmd === "set_controller_type") {
+        settings = {
+          ...settings,
+          controller_type: args!.controllerType as GeneralSettings["controller_type"],
+        };
+        return Promise.resolve(undefined);
+      }
+      throw new Error(`unexpected invoke: ${cmd}`);
+    });
+
+    const queryClient = new QueryClient();
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+
+    const { result } = renderHook(
+      () => ({ controllerType: useControllerType(), setControllerType: useSetControllerType() }),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(result.current.controllerType).toBe("xbox"));
+
+    await act(async () => {
+      await result.current.setControllerType.mutateAsync("playstation");
+    });
+
+    expect(invokeMock).toHaveBeenCalledWith("set_controller_type", {
+      controllerType: "playstation",
+    });
+    await waitFor(() => expect(result.current.controllerType).toBe("playstation"));
+  });
+});
+
+describe("video/runahead RetroArch preferences (REL-142)", () => {
+  it("defaults video_smooth=false, video_scale_integer=true, run_ahead_enabled=false and each setter round-trips", async () => {
+    let settings = generalSettings({});
+
+    invokeMock.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "get_general_settings") return Promise.resolve(settings);
+      if (cmd === "set_video_smooth") {
+        settings = { ...settings, video_smooth: args!.enabled as boolean };
+        return Promise.resolve(undefined);
+      }
+      if (cmd === "set_video_scale_integer") {
+        settings = { ...settings, video_scale_integer: args!.enabled as boolean };
+        return Promise.resolve(undefined);
+      }
+      if (cmd === "set_run_ahead_enabled") {
+        settings = { ...settings, run_ahead_enabled: args!.enabled as boolean };
+        return Promise.resolve(undefined);
+      }
+      throw new Error(`unexpected invoke: ${cmd}`);
+    });
+
+    const queryClient = new QueryClient();
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+
+    const { result } = renderHook(
+      () => ({
+        videoSmooth: useVideoSmooth(),
+        setVideoSmooth: useSetVideoSmooth(),
+        videoScaleInteger: useVideoScaleInteger(),
+        setVideoScaleInteger: useSetVideoScaleInteger(),
+        runAheadEnabled: useRunAheadEnabled(),
+        setRunAheadEnabled: useSetRunAheadEnabled(),
+      }),
+      { wrapper },
+    );
+
+    await waitFor(() => {
+      expect(result.current.videoSmooth).toBe(false);
+      expect(result.current.videoScaleInteger).toBe(true);
+      expect(result.current.runAheadEnabled).toBe(false);
+    });
+
+    await act(async () => {
+      await result.current.setVideoSmooth.mutateAsync(true);
+    });
+    expect(invokeMock).toHaveBeenCalledWith("set_video_smooth", { enabled: true });
+    await waitFor(() => expect(result.current.videoSmooth).toBe(true));
+
+    await act(async () => {
+      await result.current.setVideoScaleInteger.mutateAsync(false);
+    });
+    expect(invokeMock).toHaveBeenCalledWith("set_video_scale_integer", { enabled: false });
+    await waitFor(() => expect(result.current.videoScaleInteger).toBe(false));
+
+    await act(async () => {
+      await result.current.setRunAheadEnabled.mutateAsync(true);
+    });
+    expect(invokeMock).toHaveBeenCalledWith("set_run_ahead_enabled", { enabled: true });
+    await waitFor(() => expect(result.current.runAheadEnabled).toBe(true));
+  });
+});
+
+describe("useActiveProfileId / useSetActiveProfileId", () => {
+  it("defaults to null and updates via set_active_profile_id", async () => {
+    let settings = generalSettings({});
+
+    invokeMock.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "get_general_settings") return Promise.resolve(settings);
+      if (cmd === "set_active_profile_id") {
+        settings = { ...settings, active_profile_id: args!.profileId as string | null };
+        return Promise.resolve(undefined);
+      }
+      throw new Error(`unexpected invoke: ${cmd}`);
+    });
+
+    const queryClient = new QueryClient();
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+
+    const { result } = renderHook(
+      () => ({
+        activeProfileId: useActiveProfileId(),
+        setActiveProfileId: useSetActiveProfileId(),
+      }),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(result.current.activeProfileId).toBeNull());
+
+    await act(async () => {
+      await result.current.setActiveProfileId.mutateAsync("profile-1");
+    });
+
+    expect(invokeMock).toHaveBeenCalledWith("set_active_profile_id", { profileId: "profile-1" });
+    await waitFor(() => expect(result.current.activeProfileId).toBe("profile-1"));
+  });
+});
