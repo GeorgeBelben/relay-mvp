@@ -1,5 +1,6 @@
 pub mod db;
 pub mod emulator;
+pub mod game_media_files;
 pub mod init;
 pub mod library;
 pub mod retroachievements;
