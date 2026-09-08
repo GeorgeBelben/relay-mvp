@@ -4,4 +4,5 @@ pub mod library;
 pub mod scan;
 pub mod secrets;
 pub mod storage;
+pub mod system;
 pub mod systems;
