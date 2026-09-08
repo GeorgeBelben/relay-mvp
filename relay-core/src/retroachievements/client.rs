@@ -4,11 +4,9 @@
 //! for years. No OAuth exchange needed. Ported from the Electron MVP's
 //! `lib/retroachievements/client.ts`.
 //!
-//! `getGameListWithHashes` (ROM-hash -> RA game ID matching, used by the ingestion pipeline to
-//! auto-populate `games.retroachievements_game_id`) isn't ported here -- that's an ingestion/
-//! matching concern, not profile-linking, and out of scope for this pass. Until it lands, no game
-//! ever gets an RA game ID, so `get_game_info_and_user_progress` always has nothing to look up --
-//! same "shows nothing until enrichment runs" shape as unenriched box art.
+//! `get_console_ids`/`get_game_list_with_hashes` (ROM-hash -> RA game ID matching) back
+//! `ingestion::identify::retroachievements`, which is what actually populates
+//! `games.retroachievements_game_id` during a scan -- this module just wraps the raw endpoints.
 
 use std::collections::HashMap;
 
@@ -270,6 +268,42 @@ impl RetroAchievementsClient {
 
         Ok(RaUserStats { points: raw.total_points, rank: raw.rank, recent_unlocks })
     }
+
+    /// Every console RA tracks, for resolving one of Relay's own system ids to RA's numeric
+    /// console ID (needed by `get_game_list_with_hashes`) -- see `ingestion::identify::retroachievements`
+    /// for how that resolution actually happens. `g=1` excludes Hubs/Events, which aren't real
+    /// consoles and would never match a scanned ROM.
+    pub async fn get_console_ids(&self) -> Result<Vec<RaConsole>, RaError> {
+        let value = self.get("API_GetConsoleIDs.php", &[("g", "1".to_string())]).await?;
+        serde_json::from_value(value).map_err(RaError::Parse)
+    }
+
+    /// Every game RA knows for one console, with the MD5 hashes of every ROM dump it recognizes
+    /// as that game -- verified against api-docs.retroachievements.org/v1/get-game-list.html.
+    /// The response can be large per the docs' own caching guidance; callers are expected to
+    /// fetch once per console and cache, not call this per-ROM.
+    pub async fn get_game_list_with_hashes(&self, console_id: i64) -> Result<Vec<RaGameWithHashes>, RaError> {
+        let value = self.get("API_GetGameList.php", &[("i", console_id.to_string()), ("h", "1".to_string())]).await?;
+        serde_json::from_value(value).map_err(RaError::Parse)
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct RaConsole {
+    #[serde(rename = "ID")]
+    pub id: i64,
+    #[serde(rename = "Name")]
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct RaGameWithHashes {
+    #[serde(rename = "ID")]
+    pub id: i64,
+    #[serde(rename = "Title")]
+    pub title: String,
+    #[serde(rename = "Hashes", default)]
+    pub hashes: Vec<String>,
 }
 
 #[cfg(test)]
