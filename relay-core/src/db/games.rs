@@ -1,0 +1,254 @@
+use serde::Serialize;
+use sqlx::SqlitePool;
+
+use super::time::now_unix;
+
+#[derive(Debug, Serialize)]
+pub struct Game {
+    pub id: String,
+    pub rom_id: String,
+    pub title: String,
+    pub scanned_title: Option<String>,
+    pub steamgriddb_id: Option<i64>,
+    pub match_confidence: Option<f64>,
+    pub enriched_at: Option<i64>,
+    pub retroachievements_game_id: Option<i64>,
+    pub retroachievements_matched_at: Option<i64>,
+    pub ra_highest_award_kind: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+pub struct NewGame {
+    pub rom_id: String,
+    pub title: String,
+}
+
+pub async fn list(pool: &SqlitePool) -> Result<Vec<Game>, sqlx::Error> {
+    sqlx::query_as!(
+        Game,
+        r#"SELECT id, rom_id, title, scanned_title,
+                  steamgriddb_id as "steamgriddb_id: i64",
+                  match_confidence,
+                  enriched_at as "enriched_at: i64",
+                  retroachievements_game_id as "retroachievements_game_id: i64",
+                  retroachievements_matched_at as "retroachievements_matched_at: i64",
+                  ra_highest_award_kind,
+                  created_at as "created_at!: i64", updated_at as "updated_at!: i64"
+           FROM games ORDER BY title"#
+    )
+    .fetch_all(pool)
+    .await
+}
+
+pub async fn get(pool: &SqlitePool, id: &str) -> Result<Option<Game>, sqlx::Error> {
+    sqlx::query_as!(
+        Game,
+        r#"SELECT id, rom_id, title, scanned_title,
+                  steamgriddb_id as "steamgriddb_id: i64",
+                  match_confidence,
+                  enriched_at as "enriched_at: i64",
+                  retroachievements_game_id as "retroachievements_game_id: i64",
+                  retroachievements_matched_at as "retroachievements_matched_at: i64",
+                  ra_highest_award_kind,
+                  created_at as "created_at!: i64", updated_at as "updated_at!: i64"
+           FROM games WHERE id = ?"#,
+        id
+    )
+    .fetch_optional(pool)
+    .await
+}
+
+pub async fn create(pool: &SqlitePool, new: NewGame) -> Result<Game, sqlx::Error> {
+    let id = nanoid::nanoid!();
+    let now = now_unix();
+    sqlx::query_as!(
+        Game,
+        r#"INSERT INTO games (id, rom_id, title, scanned_title, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?)
+           RETURNING id, rom_id, title, scanned_title,
+                     steamgriddb_id as "steamgriddb_id: i64",
+                     match_confidence,
+                     enriched_at as "enriched_at: i64",
+                     retroachievements_game_id as "retroachievements_game_id: i64",
+                     retroachievements_matched_at as "retroachievements_matched_at: i64",
+                     ra_highest_award_kind,
+                     created_at as "created_at!: i64", updated_at as "updated_at!: i64""#,
+        id,
+        new.rom_id,
+        new.title,
+        new.title,
+        now,
+        now,
+    )
+    .fetch_one(pool)
+    .await
+}
+
+/// Insert-or-update keyed on `rom_id` (unique) -- a rescan always re-upserts the game for every
+/// rom it finds. `scanned_title` always tracks the current filename-derived title, but `title`
+/// itself is only overwritten while the game hasn't been SteamGridDB-matched yet: once matched,
+/// `title` comes from SteamGridDB, and a routine rescan shouldn't stomp that back to a filename
+/// guess. Ported from the Electron MVP's `gamesRepository.upsertForRom`.
+pub async fn upsert_for_rom(pool: &SqlitePool, rom_id: &str, title: &str) -> Result<Game, sqlx::Error> {
+    let id = nanoid::nanoid!();
+    let now = now_unix();
+    sqlx::query_as!(
+        Game,
+        r#"INSERT INTO games (id, rom_id, title, scanned_title, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT (rom_id) DO UPDATE SET
+             title = CASE WHEN steamgriddb_id IS NULL THEN excluded.title ELSE title END,
+             scanned_title = excluded.scanned_title,
+             updated_at = excluded.updated_at
+           RETURNING id, rom_id, title, scanned_title,
+                     steamgriddb_id as "steamgriddb_id: i64",
+                     match_confidence,
+                     enriched_at as "enriched_at: i64",
+                     retroachievements_game_id as "retroachievements_game_id: i64",
+                     retroachievements_matched_at as "retroachievements_matched_at: i64",
+                     ra_highest_award_kind,
+                     created_at as "created_at!: i64", updated_at as "updated_at!: i64""#,
+        id,
+        rom_id,
+        title,
+        title,
+        now,
+        now,
+    )
+    .fetch_one(pool)
+    .await
+}
+
+pub async fn update(pool: &SqlitePool, id: &str, title: &str) -> Result<Game, sqlx::Error> {
+    let now = now_unix();
+    sqlx::query_as!(
+        Game,
+        r#"UPDATE games SET title = ?, updated_at = ?
+           WHERE id = ?
+           RETURNING id, rom_id, title, scanned_title,
+                     steamgriddb_id as "steamgriddb_id: i64",
+                     match_confidence,
+                     enriched_at as "enriched_at: i64",
+                     retroachievements_game_id as "retroachievements_game_id: i64",
+                     retroachievements_matched_at as "retroachievements_matched_at: i64",
+                     ra_highest_award_kind,
+                     created_at as "created_at!: i64", updated_at as "updated_at!: i64""#,
+        title,
+        now,
+        id,
+    )
+    .fetch_one(pool)
+    .await
+}
+
+/// A game's media folder is keyed on `<system_id>/<game_id>` (see library::game_media_dir),
+/// but `system_id` lives on the rom, not the game -- this is the one-step join every call site that
+/// needs to build that path wants, instead of a `games::get` + `roms::get` pair.
+pub async fn system_id_for_game(pool: &SqlitePool, id: &str) -> Result<Option<String>, sqlx::Error> {
+    sqlx::query_scalar!(r#"SELECT roms.system_id FROM games JOIN roms ON games.rom_id = roms.id WHERE games.id = ?"#, id)
+        .fetch_optional(pool)
+        .await
+}
+
+#[derive(Debug, PartialEq)]
+pub struct UnenrichedGame {
+    pub id: String,
+    pub title: String,
+    pub system_id: String,
+}
+
+/// Games an enrichment pass hasn't touched yet, joined with their rom's system (needed to lay
+/// out where a matched game's box art gets downloaded to). Excludes roms whose file has gone
+/// missing since the last scan. Ported from the Electron MVP's `gamesRepository.listUnenriched`.
+pub async fn list_unenriched(pool: &SqlitePool) -> Result<Vec<UnenrichedGame>, sqlx::Error> {
+    sqlx::query_as!(
+        UnenrichedGame,
+        r#"SELECT games.id, games.title, roms.system_id
+           FROM games
+           JOIN roms ON games.rom_id = roms.id
+           WHERE roms.status = 'ok' AND games.enriched_at IS NULL"#
+    )
+    .fetch_all(pool)
+    .await
+}
+
+pub async fn mark_matched(
+    pool: &SqlitePool,
+    id: &str,
+    steamgriddb_id: i64,
+    title: &str,
+    match_confidence: f64,
+) -> Result<Game, sqlx::Error> {
+    let now = now_unix();
+    sqlx::query_as!(
+        Game,
+        r#"UPDATE games SET steamgriddb_id = ?, title = ?, match_confidence = ?, enriched_at = ?, updated_at = ?
+           WHERE id = ?
+           RETURNING id, rom_id, title, scanned_title,
+                     steamgriddb_id as "steamgriddb_id: i64",
+                     match_confidence,
+                     enriched_at as "enriched_at: i64",
+                     retroachievements_game_id as "retroachievements_game_id: i64",
+                     retroachievements_matched_at as "retroachievements_matched_at: i64",
+                     ra_highest_award_kind,
+                     created_at as "created_at!: i64", updated_at as "updated_at!: i64""#,
+        steamgriddb_id,
+        title,
+        match_confidence,
+        now,
+        now,
+        id,
+    )
+    .fetch_one(pool)
+    .await
+}
+
+// enrichedAt set with steamgriddbId left null means "we tried and SteamGridDB has nothing for
+// this title" -- distinct from never having tried at all (enrichedAt still null), which is what
+// makes list_unenriched() stop re-querying for a game that already confirmed no match.
+pub async fn mark_no_match(pool: &SqlitePool, id: &str) -> Result<Game, sqlx::Error> {
+    let now = now_unix();
+    sqlx::query_as!(
+        Game,
+        r#"UPDATE games SET enriched_at = ?, updated_at = ?
+           WHERE id = ?
+           RETURNING id, rom_id, title, scanned_title,
+                     steamgriddb_id as "steamgriddb_id: i64",
+                     match_confidence,
+                     enriched_at as "enriched_at: i64",
+                     retroachievements_game_id as "retroachievements_game_id: i64",
+                     retroachievements_matched_at as "retroachievements_matched_at: i64",
+                     ra_highest_award_kind,
+                     created_at as "created_at!: i64", updated_at as "updated_at!: i64""#,
+        now,
+        now,
+        id,
+    )
+    .fetch_one(pool)
+    .await
+}
+
+// Piggybacks on the existing per-game achievements fetch (game_actions::get_achievements) rather
+// than a dedicated sync pass -- every tile focus already triggers that fetch, so there's no need
+// for a separate background job just to keep this column current. Ported from the Electron MVP's
+// `gamesRepository.updateHighestAwardKind`.
+pub async fn update_highest_award_kind(pool: &SqlitePool, id: &str, ra_highest_award_kind: Option<&str>) -> Result<(), sqlx::Error> {
+    let now = now_unix();
+    sqlx::query!("UPDATE games SET ra_highest_award_kind = ?, updated_at = ? WHERE id = ?", ra_highest_award_kind, now, id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+// No FK cascade configured, so game_media rows are removed explicitly first rather than
+// left orphaned (mirrors profiles::delete's handling of ra_stats).
+pub async fn delete(pool: &SqlitePool, id: &str) -> Result<(), sqlx::Error> {
+    sqlx::query!("DELETE FROM game_media WHERE game_id = ?", id)
+        .execute(pool)
+        .await?;
+    sqlx::query!("DELETE FROM games WHERE id = ?", id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}

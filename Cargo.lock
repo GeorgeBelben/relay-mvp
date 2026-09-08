@@ -3707,13 +3707,20 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "chacha20poly1305",
+ "crc32fast",
  "dirs",
+ "libc",
+ "nanoid",
  "nix",
+ "regex",
+ "reqwest",
  "serde",
+ "serde_json",
  "sqlx",
  "tempfile",
  "thiserror 2.0.20",
  "tokio",
+ "unicode-normalization",
  "walkdir",
 ]
 
