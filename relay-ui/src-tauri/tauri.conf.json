@@ -46,7 +46,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEFCRkQ0RTAxMkU0RDE3QjMKUldTekYwMHVBVTc5cTJIK0FVM2IwYU5MTzBlYkkwVi9ONnVCd1NWbnJMYWx1QnVxZjBMTk91VEwK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhDQzcxRThGMzZBOTBGNTQKUldSVUQ2azJqeDdIak1aTWxVc1N6ZWQ0Q1MvU3dtZWVicE5oTUQ4ck9VSy90RE9sMG84SjVQV3IK",
       "endpoints": [
         "https://github.com/GeorgeBelben/relay/releases/latest/download/latest.json"
       ]
