@@ -79,8 +79,14 @@ impl RaHashLookup {
         }
 
         let consoles = self.consoles_list().await?;
-        let target = normalize_for_match(system_name);
-        let matched = consoles.iter().find(|c| normalize_for_match(&c.name).split(' ').any(|word| word == target))?;
+        // Padding both sides with a space and checking substring containment matches a whole
+        // *sequence* of words (needed for multi-word targets like "game boy advance" -- checking
+        // per-word equality, as an earlier version of this did, can never match a single word
+        // against a 3-word target) while still only matching on real word boundaries, not
+        // mid-word: " nes " is never a substring of " sega genesis mega drive " even though the
+        // letters "nes" are, since "genesis" has no spaces around just that part.
+        let target = format!(" {} ", normalize_for_match(system_name));
+        let matched = consoles.iter().find(|c| format!(" {} ", normalize_for_match(&c.name)).contains(&target))?;
         let id = matched.id;
 
         self.resolved.lock().unwrap().insert(system_id.to_string(), id);
@@ -221,6 +227,28 @@ mod tests {
 
         // "NES" is a literal substring of "Genesis" but must never match it as a whole word.
         assert_eq!(lookup.console_id_for("nes", "NES").await, None);
+    }
+
+    #[tokio::test]
+    async fn console_resolution_matches_a_multi_word_system_name() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(query_param("g", "1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                { "ID": 5, "Name": "Game Boy Advance", "IconURL": "", "Active": true, "IsGameSystem": true },
+                { "ID": 21, "Name": "PlayStation 2", "IconURL": "", "Active": true, "IsGameSystem": true },
+            ])))
+            .mount(&server)
+            .await;
+
+        let cache_dir = tempfile::tempdir().unwrap();
+        let lookup = lookup_against(&server, cache_dir.path()).await;
+
+        // Relay's own SystemDef::name values for these systems, verbatim -- a naive per-word
+        // equality check (an earlier version of this function) can never match a 3-word target
+        // like "game boy advance" against any single word of a console's name.
+        assert_eq!(lookup.console_id_for("gba", "Game Boy Advance").await, Some(5));
+        assert_eq!(lookup.console_id_for("ps2", "PlayStation 2").await, Some(21));
     }
 
     #[tokio::test]
