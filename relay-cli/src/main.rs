@@ -115,16 +115,34 @@ async fn main() {
 }
 
 async fn scan(report: &relay_core::init::Report) -> Result<(), String> {
+    use relay_core::ingestion::pipeline::ScanStatus;
+
     let roms_root = relay_core::library::roms_path();
     let media_root = relay_core::library::media_path();
     let dats_cache_dir = report.data_dir.join("dats");
     let running = AtomicBool::new(false);
 
-    relay_core::ingestion::pipeline::rescan_from_settings(&report.pool, &roms_root, &media_root, &dats_cache_dir, &running, |status| {
-        println!("{status:?}");
+    let spinner = indicatif::ProgressBar::new_spinner();
+    spinner.enable_steady_tick(std::time::Duration::from_millis(100));
+    spinner.set_message("Scanning library...");
+
+    let result = relay_core::ingestion::pipeline::rescan_from_settings(&report.pool, &roms_root, &media_root, &dats_cache_dir, &running, |status| match status {
+        ScanStatus::ScanningFiles => spinner.set_message("Scanning library..."),
+        ScanStatus::EnrichingArt { current, total } => spinner.set_message(format!("Downloading artwork... {current}/{total}")),
+        ScanStatus::Idle | ScanStatus::Done | ScanStatus::Error { .. } => {}
     })
-    .await
-    .map_err(|err| format!("scan failed: {err}"))
+    .await;
+
+    if let Err(err) = result {
+        spinner.finish_and_clear();
+        return Err(format!("scan failed: {err}"));
+    }
+
+    spinner.finish_and_clear();
+
+    let found = relay_core::db::games::list(&report.pool).await.map_err(|err| format!("scan finished but couldn't count games: {err}"))?.len();
+    println!("Found {found} rom(s)");
+    Ok(())
 }
 
 async fn games(report: &relay_core::init::Report) -> Result<(), String> {
