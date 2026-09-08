@@ -27,19 +27,25 @@ async fn main() {
 
     match cli.command {
         Commands::Scan => {
-            match relay_core::scan::scan_library(&relay_core::library::library_root()) {
-                Ok(report) => {
-                    println!("Found {} rom(s):", report.roms.len());
-                    for rom in &report.roms {
-                        let name = rom.path.file_stem().and_then(|s| s.to_str()).unwrap_or("?");
-                        println!("  [{}] {}", rom.system_id, name);
-                    }
+            // NOTE: calls the raw scan stage directly (per-system folder walk only), not the full
+            // DB-backed ingestion::pipeline::rescan (scan+probe+identify+enrich) -- wiring that up
+            // (a DB pool, a NoIntroDatLookup, an optional SteamGridDB client from settings) is
+            // real design work, tracked separately rather than done inline here.
+            let roms_root = relay_core::library::library_root().join("roms");
+            let mut total = 0;
+            for system in relay_core::systems::ALL {
+                let system_folder = roms_root.join(system.id);
+                let targets = relay_core::scan::walk_system_folder(&system_folder, system.extensions).await;
+                for target in &targets {
+                    let title = match target {
+                        relay_core::scan::ScanTarget::Single { title, .. } => title,
+                        relay_core::scan::ScanTarget::MultiDisc { title, .. } => title,
+                    };
+                    println!("  [{}] {}", system.id, title);
                 }
-                Err(err) => {
-                    eprintln!("scan failed: {err}");
-                    std::process::exit(1);
-                }
+                total += targets.len();
             }
+            println!("Found {total} rom(s)");
         }
     }
 }
