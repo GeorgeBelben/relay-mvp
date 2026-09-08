@@ -73,8 +73,8 @@ export function Carousel({ focusKey, autoFocus, children }: CarouselProps) {
             {slides.map((slide, index) =>
               isValidElement(slide)
                 ? cloneElement(slide as ReactElement<TileFocusProps>, {
-                    onTileFocus: () => emblaApi?.scrollTo(index),
-                  })
+                  onTileFocus: () => emblaApi?.scrollTo(index),
+                })
                 : slide,
             )}
           </div>

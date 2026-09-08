@@ -2,5 +2,6 @@
 pub mod bluetooth;
 pub mod datetime;
 pub mod network;
+pub mod power;
+pub mod provider;
 pub mod storage;
-pub mod wallpaper;

@@ -90,14 +90,14 @@ describe("startGamepadListener", () => {
     expect(onEvent).toHaveBeenCalledWith({ type: "action", action: "confirm" });
   });
 
-  it("fires a home action for the Guide/PS/Xbox button", () => {
+  it("fires a power action for the Guide/PS/Xbox button", () => {
     const onEvent = vi.fn();
     startGamepadListener(onEvent, vi.fn());
 
-    pads = [fakeGamepad({ pressed: [16] })]; // home
+    pads = [fakeGamepad({ pressed: [16] })]; // power
     tick(0);
 
-    expect(onEvent).toHaveBeenCalledWith({ type: "action", action: "home" });
+    expect(onEvent).toHaveBeenCalledWith({ type: "action", action: "power" });
   });
 
   it("allows a released and re-pressed action to fire again", () => {

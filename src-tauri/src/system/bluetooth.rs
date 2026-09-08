@@ -13,7 +13,7 @@
 use std::process::Stdio;
 use std::time::Duration;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(10);
@@ -21,7 +21,7 @@ const PAIR_TIMEOUT: Duration = Duration::from_secs(20);
 const SCAN_SECONDS: u64 = 10;
 const SCAN_TIMEOUT: Duration = Duration::from_secs(SCAN_SECONDS + 5);
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct BluetoothDevice {
     pub address: String,
     pub name: String,

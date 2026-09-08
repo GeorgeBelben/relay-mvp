@@ -11,6 +11,7 @@ use crate::systems;
 use super::enrich;
 use super::identify::no_intro::NoIntroDatLookup;
 use super::identify::steamgriddb::SteamGridDbClient;
+use super::paths::{self, to_forward_slash};
 use super::probe;
 use super::scan::{self, ScanTarget};
 use super::title::title_from_filename;
@@ -49,12 +50,9 @@ impl From<sqlx::Error> for PipelineError {
     }
 }
 
-fn to_forward_slash(path: &Path) -> String {
-    path.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect::<Vec<_>>().join("/")
-}
-
 async fn upsert_rom_and_game(
     pool: &SqlitePool,
+    media_root: &Path,
     system_id: &str,
     path: String,
     crc32: Option<String>,
@@ -63,7 +61,17 @@ async fn upsert_rom_and_game(
     title: &str,
 ) -> Result<(), sqlx::Error> {
     let rom = roms::upsert(pool, roms::NewRom { system_id: system_id.to_string(), path, crc32, size_bytes, discs }).await?;
-    games::upsert_for_rom(pool, &rom.id, title).await?;
+    let game = games::upsert_for_rom(pool, &rom.id, title).await?;
+
+    // Every scanned ROM gets a media folder unconditionally, regardless of whether SteamGridDB
+    // ever matches it -- this is what lets a user drop their own images into it even for a game
+    // that never gets identified. Warn-and-continue: a folder that fails to create shouldn't fail
+    // the whole scan (enrich's own download still retries create_dir_all defensively).
+    let dir = paths::game_media_dir(media_root, system_id, &game.id);
+    if let Err(e) = tokio::fs::create_dir_all(&dir).await {
+        eprintln!("scan: failed to create media dir for \"{title}\" ({}): {e}", game.id);
+    }
+
     Ok(())
 }
 
@@ -71,7 +79,7 @@ async fn upsert_rom_and_game(
 /// folder, hashes what it finds, and upserts roms/games. Anything not found this pass is marked
 /// missing, not deleted. Ported from the Electron MVP's `scanLibrary.ts` (its dev-seed branch is
 /// deliberately not ported -- that's a dev-only convenience, not a pipeline concern).
-pub async fn scan_and_probe(pool: &SqlitePool, roms_root: &Path, no_intro: &NoIntroDatLookup) -> Result<usize, sqlx::Error> {
+pub async fn scan_and_probe(pool: &SqlitePool, roms_root: &Path, media_root: &Path, no_intro: &NoIntroDatLookup) -> Result<usize, sqlx::Error> {
     let mut found_paths = Vec::new();
 
     for system in systems::ALL {
@@ -100,7 +108,7 @@ pub async fn scan_and_probe(pool: &SqlitePool, roms_root: &Path, no_intro: &NoIn
                         None => title,
                     };
 
-                    upsert_rom_and_game(pool, system.id, relative, crc32, size_bytes, None, &title).await?;
+                    upsert_rom_and_game(pool, media_root, system.id, relative, crc32, size_bytes, None, &title).await?;
                 }
                 ScanTarget::MultiDisc { m3u_path, disc_paths, title } => {
                     let relative = to_forward_slash(m3u_path.strip_prefix(roms_root).unwrap_or(&m3u_path));
@@ -120,7 +128,7 @@ pub async fn scan_and_probe(pool: &SqlitePool, roms_root: &Path, no_intro: &NoIn
                     }
                     let discs_json = if discs.is_empty() { None } else { serde_json::to_string(&discs).ok() };
 
-                    upsert_rom_and_game(pool, system.id, relative, None, None, discs_json, &title).await?;
+                    upsert_rom_and_game(pool, media_root, system.id, relative, None, None, discs_json, &title).await?;
                 }
             }
         }
@@ -173,7 +181,7 @@ async fn run_rescan(
     on_status: &mut impl FnMut(ScanStatus),
 ) -> Result<(), PipelineError> {
     on_status(ScanStatus::ScanningFiles);
-    scan_and_probe(pool, roms_root, no_intro).await?;
+    scan_and_probe(pool, roms_root, media_root, no_intro).await?;
 
     if let Some(client) = steamgriddb {
         let http = reqwest::Client::new();
@@ -226,8 +234,9 @@ mod tests {
         fs::create_dir(&snes_dir).unwrap();
         fs::write(snes_dir.join("Chrono Trigger (USA).sfc"), b"fake-rom-bytes").unwrap();
         let no_intro = no_intro_stub();
+        let media_root = tempfile::tempdir().unwrap();
 
-        let found = scan_and_probe(&pool, roms_root.path(), &no_intro).await.unwrap();
+        let found = scan_and_probe(&pool, roms_root.path(), media_root.path(), &no_intro).await.unwrap();
         assert_eq!(found, 1);
 
         let all_roms = roms::list(&pool).await.unwrap();
@@ -239,9 +248,12 @@ mod tests {
         assert_eq!(all_games.len(), 1);
         assert_eq!(all_games[0].title, "Chrono Trigger");
 
+        // Every scanned game gets a media folder immediately, regardless of match status.
+        assert!(media_root.path().join("snes").join(&all_games[0].id).is_dir());
+
         // Rescanning after the file's gone marks the rom missing rather than deleting it.
         fs::remove_file(snes_dir.join("Chrono Trigger (USA).sfc")).unwrap();
-        let found_again = scan_and_probe(&pool, roms_root.path(), &no_intro).await.unwrap();
+        let found_again = scan_and_probe(&pool, roms_root.path(), media_root.path(), &no_intro).await.unwrap();
         assert_eq!(found_again, 0);
 
         let all_roms = roms::list(&pool).await.unwrap();
@@ -290,6 +302,13 @@ mod tests {
             .await;
         Mock::given(method("GET"))
             .and(path("/api/v2/grids/game/7"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "success": true, "data": [] })))
+            .mount(&server)
+            .await;
+        // enrich_one now unconditionally checks for a backdrop too -- no heroes uploaded, same
+        // "empty data" shape as the grids stub above.
+        Mock::given(method("GET"))
+            .and(path("/api/v2/heroes/game/7"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "success": true, "data": [] })))
             .mount(&server)
             .await;

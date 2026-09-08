@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Modal } from "./modal";
 import { List, ListRow } from "./list";
 import { AchievementsView } from "./achievements-view";
+import { ConfirmActionView } from "./confirm-action-view";
 import { VolumeSlider } from "./volume-slider";
 import { useLaunchStore } from "@/lib/launch/store";
 import {
@@ -16,7 +17,6 @@ import {
 import { useSystem } from "@/hooks/use-systems";
 import { useActiveProfileId } from "@/hooks/use-settings";
 import { useProfile } from "@/hooks/use-profiles";
-import { FocusContext, useBackHandler, useFocusable } from "@/lib/focus";
 import type { LibraryGame } from "@/hooks/use-library";
 
 type View = "menu" | "achievements" | "confirm-quit" | "confirm-restart";
@@ -185,50 +185,5 @@ function QuickMenuActions({
         <VolumeSlider />
       </div>
     </>
-  );
-}
-
-// Own sub-view rather than an inline conditional inside QuickMenuActions -- same reasoning as
-// AchievementsView: a distinct focus subtree needs its own FocusContext + focusSelf() so the
-// gamepad lands on it rather than wherever focus was left in the previous view. Shared by both
-// Quit and Restart (REL-148/REL-150) -- same confirm shape, only the copy and the mutation that
-// fires differ, which the caller supplies rather than this needing to know about either action.
-function ConfirmActionView({
-  title,
-  description,
-  confirmLabel,
-  onConfirm,
-  onBack,
-}: {
-  title: string;
-  description: string;
-  confirmLabel: string;
-  onConfirm: () => void;
-  onBack: () => void;
-}) {
-  useBackHandler(onBack);
-
-  const { ref, focusKey, focusSelf } = useFocusable({
-    trackChildren: true,
-    saveLastFocusedChild: true,
-  });
-  useEffect(() => {
-    focusSelf();
-    // Mount-only -- nothing async to wait for here, unlike AchievementsView's own focusSelf
-    // effect keyed on its data arriving.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  return (
-    <FocusContext.Provider value={focusKey}>
-      <div ref={ref}>
-        <h2 className="px-4 pb-2 text-base font-semibold">{title}</h2>
-        <p className="px-4 pb-3 text-sm text-muted-foreground">{description}</p>
-        <List>
-          <ListRow label={confirmLabel} onSelect={onConfirm} />
-          <ListRow label="Back" onSelect={onBack} />
-        </List>
-      </div>
-    </FocusContext.Provider>
   );
 }

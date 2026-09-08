@@ -63,7 +63,7 @@ export function CarouselGameTile({ game, onFocusTile, onTileFocus, scrollContain
       <div
         ref={ref}
         className={cn(
-          "relative flex aspect-2/3 shrink-0 flex-col justify-end overflow-hidden rounded-lg p-3 transition-bounce",
+          "relative flex aspect-square shrink-0 flex-col justify-end overflow-hidden rounded-2xl p-3 transition-bounce",
           focused ? cn(CAROUSEL_TILE_WIDTH_FOCUSED) : CAROUSEL_TILE_WIDTH,
           boxartUrl ? "" : "bg-gray-800 flex items-center justify-center ",
         )}

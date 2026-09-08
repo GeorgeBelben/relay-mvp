@@ -7,6 +7,7 @@ import { getContext, queryClient } from "./router";
 import { routeTree } from "./routeTree.gen";
 import "./main.css";
 import { ErrorBoundary } from "@/components/error-boundary";
+import { RouteErrorFallback } from "@/components/route-error-fallback";
 import { initFocusEngine } from "@/lib/focus";
 import { logger } from "@/lib/better-stack";
 
@@ -35,7 +36,20 @@ window.addEventListener("unhandledrejection", (event) => {
 // "current page" in-process instead, same reasoning as the Electron MVP's file:// setup.
 const memoryHistory = createMemoryHistory({ initialEntries: ["/"] });
 
-const router = createRouter({ routeTree, history: memoryHistory, context: getContext() });
+// defaultErrorComponent/defaultOnCatch give every route a catch boundary for free (TanStack
+// Router wraps each matched route, root included, and bubbles to the nearest one that defines
+// these) -- same "if the app errors, know about it" logging as the top-level ErrorBoundary below,
+// but scoped per-route so a crash in one page doesn't take the whole kiosk chrome down with it.
+const router = createRouter({
+  routeTree,
+  history: memoryHistory,
+  context: getContext(),
+  defaultErrorComponent: RouteErrorFallback,
+  defaultOnCatch: (error, info) => {
+    logger.error(error, { componentStack: info.componentStack });
+    void logger.flush();
+  },
+});
 
 declare module "@tanstack/react-router" {
   interface Register {

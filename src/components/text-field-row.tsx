@@ -22,10 +22,18 @@ export function TextFieldRow({ label, value, onCommit, secret, placeholder }: Te
   const [draft, setDraft] = useState(value);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // Virtual focus never actually leaves this row while editing -- it just swaps its own JSX for
+  // the <input> below, so norigin still routes a gamepad confirm press here rather than to the
+  // input itself (unlike a physical keyboard's Enter keydown, which the input's own onKeyDown
+  // below catches directly, bypassing this callback entirely). So this one callback has to do
+  // double duty: open the field the first time, save the draft the second.
   const { ref, focused, focusSelf } = useFocusable({
     onEnterPress: () => {
-      setDraft(value);
-      setEditing(true);
+      if (editing) save();
+      else {
+        setDraft(value);
+        setEditing(true);
+      }
     },
   });
 

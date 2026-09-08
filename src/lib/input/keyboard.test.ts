@@ -14,8 +14,8 @@ describe("mapKeyToNavEvent", () => {
     expect(mapKeyToNavEvent("Escape")).toEqual({ type: "action", action: "back" });
   });
 
-  it("maps Home to the home action", () => {
-    expect(mapKeyToNavEvent("Home")).toEqual({ type: "action", action: "home" });
+  it("maps Backspace to the power action", () => {
+    expect(mapKeyToNavEvent("Backspace")).toEqual({ type: "action", action: "power" });
   });
 
   it("returns null for unmapped keys", () => {
@@ -39,15 +39,15 @@ describe("startKeyboardListener", () => {
     stop();
   });
 
-  it("fires onEvent and onUsed for Home (system menu)", () => {
+  it("fires onEvent and onUsed for Backspace (power menu)", () => {
     const onEvent = vi.fn();
     const onUsed = vi.fn();
     const stop = startKeyboardListener(onEvent, onUsed);
 
-    const event = new KeyboardEvent("keydown", { key: "Home", cancelable: true });
+    const event = new KeyboardEvent("keydown", { key: "Backspace", cancelable: true });
     window.dispatchEvent(event);
 
-    expect(onEvent).toHaveBeenCalledWith({ type: "action", action: "home" });
+    expect(onEvent).toHaveBeenCalledWith({ type: "action", action: "power" });
     expect(onUsed).toHaveBeenCalledOnce();
     expect(event.defaultPrevented).toBe(true);
     stop();

@@ -7,7 +7,7 @@ export const BUTTON_ACTION_MAP: Record<number, NavAction> = {
   0: "confirm", // A / Cross
   1: "back", // B / Circle
   3: "menu", // Y / Triangle / X (north face button)
-  16: "home", // Guide / PS / Xbox button -- REL-138's system menu, distinct from "menu" above
+  16: "power", // Guide / PS / Xbox button -- opens the Power Menu, distinct from "menu" above
 };
 
 export const BUTTON_DIRECTION_MAP: Record<number, NavDirection> = {

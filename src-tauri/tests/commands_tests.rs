@@ -264,6 +264,11 @@ async fn get_storage_usage_command_returns_a_category_breakdown_through_ipc() {
     assert!(usage["system_bytes"].as_u64().is_some());
 }
 
+// Linux-only: exercises the real LinuxSystemProvider (nmcli), which only compiles in on
+// target_os = "linux" -- on any other target (e.g. macOS dev) commands::network goes through
+// MockSystemProvider instead, which succeeds rather than erroring, so this test's premise doesn't
+// hold there.
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn network_commands_are_registered_and_reachable_through_ipc() {
     // No real nmcli/NetworkManager in this dev environment (see system::network's module docs),
@@ -294,6 +299,9 @@ async fn network_commands_are_registered_and_reachable_through_ipc() {
     assert!(matches!(error["reason"].as_str(), Some("unknown") | Some("unreachable") | Some("wrong-password")));
 }
 
+// Linux-only: exercises the real LinuxSystemProvider (bluetoothctl) -- see the cfg note on
+// network_commands_are_registered_and_reachable_through_ipc above.
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn bluetooth_commands_are_registered_and_reachable_through_ipc() {
     // No real bluetoothctl/Bluetooth adapter in this dev environment (see system::bluetooth's
@@ -325,6 +333,32 @@ async fn bluetooth_commands_are_registered_and_reachable_through_ipc() {
     let remove_res =
         get_ipc_response(&webview, invoke_request("remove_bluetooth_device", json!({ "address": "AA:BB:CC:DD:EE:FF" })));
     assert!(remove_res.is_err(), "expected bluetoothctl-not-found on a machine with no BlueZ");
+}
+
+// Non-Linux counterpart to the two Linux-only tests above -- proves the same IPC wiring
+// (camelCase args, command names) against MockSystemProvider, which succeeds using the default
+// dev fixture instead of erroring like the real nmcli/bluetoothctl-backed provider does.
+#[cfg(not(target_os = "linux"))]
+#[tokio::test]
+async fn network_and_bluetooth_commands_are_reachable_through_ipc_via_the_mock_provider() {
+    let app = mock_builder()
+        .invoke_handler(tauri::generate_handler![
+            commands::network::list_wifi_networks,
+            commands::bluetooth::list_paired_bluetooth_devices,
+        ])
+        .build(mock_context(noop_assets()))
+        .expect("failed to build mock app");
+
+    let webview = WebviewWindowBuilder::new(&app, "main", Default::default()).build().unwrap();
+
+    let list_res = get_ipc_response(&webview, invoke_request("list_wifi_networks", json!({})));
+    let networks: Value = list_res.expect("list_wifi_networks should succeed via the mock provider").deserialize().unwrap();
+    assert!(!networks.as_array().unwrap().is_empty());
+
+    let paired_res = get_ipc_response(&webview, invoke_request("list_paired_bluetooth_devices", json!({})));
+    let devices: Value =
+        paired_res.expect("list_paired_bluetooth_devices should succeed via the mock provider").deserialize().unwrap();
+    assert!(!devices.as_array().unwrap().is_empty());
 }
 
 #[tokio::test]

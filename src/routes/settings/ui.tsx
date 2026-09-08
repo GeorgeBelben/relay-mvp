@@ -3,7 +3,6 @@ import { FocusContext, useBackHandler, usePageFocus } from "@/lib/focus";
 import { useActionHints } from "@/lib/hints";
 import { useRumbleEnabled, useSetRumbleEnabled } from "@/hooks/use-settings";
 import { ControllerTypePicker } from "@/components/controller-type-picker";
-import { WallpaperPicker } from "@/components/wallpaper-picker";
 import { VolumeSlider } from "@/components/volume-slider";
 import { List, ListRow } from "@/components/list";
 import { Header } from "@/components/header";
@@ -33,11 +32,6 @@ function UiSettings() {
           <section className="space-y-2">
             <p className="text-sm font-medium">Controller</p>
             <ControllerTypePicker />
-          </section>
-
-          <section className="mt-6 space-y-2">
-            <p className="text-sm font-medium">Wallpaper</p>
-            <WallpaperPicker />
           </section>
 
           <section className="mt-6 space-y-2">

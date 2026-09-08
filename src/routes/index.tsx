@@ -1,7 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { FocusContext, useFocusable, useRegisterPageFocus } from "@/lib/focus";
 import { useActionHints } from "@/lib/hints";
+import { useBackdropStore } from "@/lib/backdrop";
 import { useLibrary, useRecentlyAdded, useRecentlyPlayed } from "@/hooks/use-library";
 import { Header } from "@/components/header";
 import { Carousel } from "@/components/carousel";
@@ -41,6 +42,15 @@ function Home() {
   // to tell "show the default" apart from "show nothing" -- both would otherwise just be falsy.
   const [highlightedGame, setHighlightedGame] = useState<LibraryGame | null | undefined>(undefined);
   const heroGame = highlightedGame === undefined ? (recentGames[0] ?? null) : highlightedGame;
+
+  // BackdropLayer lives at the root layout, outside this route's own tree, so the store is what
+  // bridges "which game is highlighted here" to "what the global background should show" --
+  // mirrors heroGame exactly rather than tracking focus separately, so the hero details panel and
+  // the background always agree on which game is highlighted.
+  const setBackdropGame = useBackdropStore((state) => state.setBackdropGame);
+  useEffect(() => {
+    setBackdropGame(heroGame);
+  }, [heroGame, setBackdropGame]);
 
   const { ref, focusKey } = useFocusable({ focusKey: "HOME" });
   // Not usePageFocus -- Home drives its own initial focus via Carousel's autoFocus (data-dependent,

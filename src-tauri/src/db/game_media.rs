@@ -63,17 +63,45 @@ pub async fn create(pool: &SqlitePool, new: NewGameMedia) -> Result<GameMedia, s
 
 /// Insert-or-replace keyed on the table's `(game_id, kind)` unique constraint -- unlike `create`
 /// above (a plain insert, correct for the automatic enrichment pipeline's one-shot-per-game call
-/// site), this is what a manual re-match (`game_actions::apply_match`) needs: applying a
-/// *different* box art to an already-enriched game must replace its existing boxart row, not
-/// collide with the unique constraint or leave the old row orphaned. Ported from the Electron
-/// MVP's `gameMediaRepository.upsertBoxart`.
-pub async fn upsert_boxart(pool: &SqlitePool, game_id: &str, local_path: &str, source_url: &str) -> Result<GameMedia, sqlx::Error> {
+/// site), this is what applying a *different* box art to an already-enriched game needs: replace
+/// the existing boxart row, don't collide with the unique constraint or leave the old row
+/// orphaned. Used both by `game_actions::apply_reidentify` (a downloaded SteamGridDB image, so
+/// `source_url` is `Some`) and `game_media_files::select_boxart_file` (a file the user dropped
+/// into the media folder directly, with no remote origin, so `source_url` is `None`). Ported from
+/// the Electron MVP's `gameMediaRepository.upsertBoxart`.
+pub async fn upsert_boxart(pool: &SqlitePool, game_id: &str, local_path: &str, source_url: Option<&str>) -> Result<GameMedia, sqlx::Error> {
     let id = nanoid::nanoid!();
     let now = now_unix();
     sqlx::query_as!(
         GameMedia,
         r#"INSERT INTO game_media (id, game_id, kind, local_path, source_url, created_at)
            VALUES (?, ?, 'boxart', ?, ?, ?)
+           ON CONFLICT (game_id, kind) DO UPDATE SET
+             local_path = excluded.local_path,
+             source_url = excluded.source_url,
+             created_at = excluded.created_at
+           RETURNING id, game_id, kind, local_path, source_url, created_at as "created_at!: i64""#,
+        id,
+        game_id,
+        local_path,
+        source_url,
+        now,
+    )
+    .fetch_one(pool)
+    .await
+}
+
+/// Same insert-or-replace shape as `upsert_boxart`, just keyed on the `"backdrop"` kind instead --
+/// see that function's doc comment for why this is a separate literal-SQL function rather than a
+/// generic `kind`-parameterized one (this codebase's existing convention, and `sqlx::query_as!`'s
+/// compile-time checking wants the kind spelled out in the SQL itself).
+pub async fn upsert_backdrop(pool: &SqlitePool, game_id: &str, local_path: &str, source_url: Option<&str>) -> Result<GameMedia, sqlx::Error> {
+    let id = nanoid::nanoid!();
+    let now = now_unix();
+    sqlx::query_as!(
+        GameMedia,
+        r#"INSERT INTO game_media (id, game_id, kind, local_path, source_url, created_at)
+           VALUES (?, ?, 'backdrop', ?, ?, ?)
            ON CONFLICT (game_id, kind) DO UPDATE SET
              local_path = excluded.local_path,
              source_url = excluded.source_url,

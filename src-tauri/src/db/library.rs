@@ -4,12 +4,13 @@ use sqlx::SqlitePool;
 use crate::systems;
 
 /// Ready-to-render library data -- one row per playable game (its file still present at the last
-/// scan), joined with its system and (if any) box art. `boxart_path` is forward-slash-relative to
-/// the media root (see `commands::game_media::get_media_root_path`) -- resolving it into something
-/// an `<img>` can load is a frontend-loading decision (asset-protocol scope vs. a byte-serving
-/// command), not this module's job, same reasoning as `get_media_root_path`'s own doc comment.
-/// Ported from the Electron MVP's `gamesRepository.listWithSystem`/`listAllByTitle`/`listRecentlyAdded`
-/// + `libraryService.toLibraryGame`.
+/// scan), joined with its system and (if any) box art and backdrop. `boxart_path`/`backdrop_path`
+/// are forward-slash-relative to the media root (see `commands::game_media::get_media_root_path`)
+/// -- resolving either into something an `<img>` can load is a frontend-loading decision
+/// (asset-protocol scope vs. a byte-serving command), not this module's job, same reasoning as
+/// `get_media_root_path`'s own doc comment. Ported from the Electron MVP's
+/// `gamesRepository.listWithSystem`/`listAllByTitle`/`listRecentlyAdded` + `libraryService.toLibraryGame`
+/// (backdrop is new in this rewrite -- the Electron MVP never fetched one).
 #[derive(Debug, Clone, Serialize)]
 pub struct LibraryGame {
     pub id: String,
@@ -17,6 +18,7 @@ pub struct LibraryGame {
     pub system_id: String,
     pub system_name: String,
     pub boxart_path: Option<String>,
+    pub backdrop_path: Option<String>,
     // Cumulative ladder (see the games table's ra_highest_award_kind column) -- any non-null value
     // means the game was beaten at minimum, regardless of which tier it's actually reached.
     pub beaten: bool,
@@ -35,6 +37,7 @@ struct LibraryGameRow {
     title: String,
     system_id: String,
     boxart_path: Option<String>,
+    backdrop_path: Option<String>,
     ra_highest_award_kind: Option<String>,
     created_at: i64,
 }
@@ -50,6 +53,7 @@ impl From<LibraryGameRow> for LibraryGame {
             system_id: row.system_id,
             system_name,
             boxart_path: row.boxart_path,
+            backdrop_path: row.backdrop_path,
             beaten: row.ra_highest_award_kind.is_some(),
             added_at: row.created_at,
         }
@@ -63,12 +67,14 @@ pub async fn list_shelves(pool: &SqlitePool) -> Result<Vec<LibraryShelf>, sqlx::
         LibraryGameRow,
         r#"SELECT games.id, games.title,
                   roms.system_id as "system_id!",
-                  game_media.local_path as boxart_path,
+                  boxart.local_path as boxart_path,
+                  backdrop.local_path as backdrop_path,
                   games.ra_highest_award_kind,
                   games.created_at as "created_at!: i64"
            FROM games
            JOIN roms ON games.rom_id = roms.id
-           LEFT JOIN game_media ON game_media.game_id = games.id AND game_media.kind = 'boxart'
+           LEFT JOIN game_media boxart ON boxart.game_id = games.id AND boxart.kind = 'boxart'
+           LEFT JOIN game_media backdrop ON backdrop.game_id = games.id AND backdrop.kind = 'backdrop'
            WHERE roms.status = 'ok'
            ORDER BY games.title"#
     )
@@ -97,12 +103,14 @@ pub async fn list_all_games(pool: &SqlitePool) -> Result<Vec<LibraryGame>, sqlx:
         LibraryGameRow,
         r#"SELECT games.id, games.title,
                   roms.system_id as "system_id!",
-                  game_media.local_path as boxart_path,
+                  boxart.local_path as boxart_path,
+                  backdrop.local_path as backdrop_path,
                   games.ra_highest_award_kind,
                   games.created_at as "created_at!: i64"
            FROM games
            JOIN roms ON games.rom_id = roms.id
-           LEFT JOIN game_media ON game_media.game_id = games.id AND game_media.kind = 'boxart'
+           LEFT JOIN game_media boxart ON boxart.game_id = games.id AND boxart.kind = 'boxart'
+           LEFT JOIN game_media backdrop ON backdrop.game_id = games.id AND backdrop.kind = 'backdrop'
            WHERE roms.status = 'ok'
            ORDER BY games.title"#
     )
@@ -119,12 +127,14 @@ pub async fn list_recently_added(pool: &SqlitePool, limit: i64) -> Result<Vec<Li
         LibraryGameRow,
         r#"SELECT games.id, games.title,
                   roms.system_id as "system_id!",
-                  game_media.local_path as boxart_path,
+                  boxart.local_path as boxart_path,
+                  backdrop.local_path as backdrop_path,
                   games.ra_highest_award_kind,
                   games.created_at as "created_at!: i64"
            FROM games
            JOIN roms ON games.rom_id = roms.id
-           LEFT JOIN game_media ON game_media.game_id = games.id AND game_media.kind = 'boxart'
+           LEFT JOIN game_media boxart ON boxart.game_id = games.id AND boxart.kind = 'boxart'
+           LEFT JOIN game_media backdrop ON backdrop.game_id = games.id AND backdrop.kind = 'backdrop'
            WHERE roms.status = 'ok'
            ORDER BY games.created_at DESC
            LIMIT ?"#,
@@ -198,6 +208,41 @@ mod tests {
         assert_eq!(nes_shelf.games[0].title, "Mario");
         assert!(!nes_shelf.games[0].beaten);
         assert_eq!(nes_shelf.games[0].boxart_path, None);
+        assert_eq!(nes_shelf.games[0].backdrop_path, None);
+    }
+
+    #[tokio::test]
+    async fn list_all_games_includes_boxart_and_backdrop_independently() {
+        let (pool, _dir) = throwaway_pool().await;
+        seed_rom(&pool, "r1", "nes", "mario.nes", "ok").await;
+        seed_game(&pool, "g1", "r1", "Mario", 1).await;
+        crate::db::game_media::create(
+            &pool,
+            crate::db::game_media::NewGameMedia {
+                game_id: "g1".into(),
+                kind: "boxart".into(),
+                local_path: "nes/g1/boxart-1.png".into(),
+                source_url: None,
+            },
+        )
+        .await
+        .unwrap();
+        crate::db::game_media::create(
+            &pool,
+            crate::db::game_media::NewGameMedia {
+                game_id: "g1".into(),
+                kind: "backdrop".into(),
+                local_path: "nes/g1/backdrop-1.png".into(),
+                source_url: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        let games = list_all_games(&pool).await.unwrap();
+
+        assert_eq!(games[0].boxart_path.as_deref(), Some("nes/g1/boxart-1.png"));
+        assert_eq!(games[0].backdrop_path.as_deref(), Some("nes/g1/backdrop-1.png"));
     }
 
     #[tokio::test]

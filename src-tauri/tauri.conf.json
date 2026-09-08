@@ -13,7 +13,7 @@
     "windows": [
       {
         "title": "Relay",
-        "fullscreen": false,
+        "fullscreen": true,
         "decorations": false,
         "visible": false,
         "backgroundColor": "#111111"
@@ -23,13 +23,17 @@
       "csp": null,
       "assetProtocol": {
         "enable": true,
-        "scope": ["$HOME/Relay/**"]
+        "scope": [
+          "$HOME/Relay/**"
+        ]
       }
     }
   },
   "bundle": {
     "active": true,
-    "targets": ["deb"],
+    "targets": [
+      "deb"
+    ],
     "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
@@ -42,7 +46,9 @@
   "plugins": {
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEFCRkQ0RTAxMkU0RDE3QjMKUldTekYwMHVBVTc5cTJIK0FVM2IwYU5MTzBlYkkwVi9ONnVCd1NWbnJMYWx1QnVxZjBMTk91VEwK",
-      "endpoints": ["https://github.com/GeorgeBelben/relay/releases/latest/download/latest.json"]
+      "endpoints": [
+        "https://github.com/GeorgeBelben/relay/releases/latest/download/latest.json"
+      ]
     }
   }
 }

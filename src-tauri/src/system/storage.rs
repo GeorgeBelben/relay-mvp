@@ -10,6 +10,8 @@ use std::pin::Pin;
 
 use serde::Serialize;
 
+use crate::systems;
+
 // Async recursion needs boxing -- a naive recursive `async fn` has an infinite-size future.
 pub fn get_directory_size(dir: PathBuf) -> Pin<Box<dyn Future<Output = u64> + Send>> {
     Box::pin(async move {
@@ -75,11 +77,18 @@ pub struct StorageUsage {
 }
 
 /// Creates the full `~/Relay` directory tree up front (REL-129), matching the Electron MVP's
-/// behavior at launch. `create_dir_all` no-ops on subdirectories that already exist, so this is
-/// safe to call on every startup, not just the first.
+/// behavior at launch -- including one `roms/<system_id>` subfolder per system in the fixed
+/// catalog (`systems::ALL`, e.g. `roms/gamecube`), so a user knows exactly where to drop files
+/// for a given system without having to first read docs or guess the id `ingestion::scan`
+/// expects. `create_dir_all` no-ops on subdirectories that already exist, so this is safe to call
+/// on every startup, not just the first.
 pub async fn ensure_library_dirs(library_root: &Path) -> io::Result<()> {
-    for subdir in ["roms", "bios", "media", "wallpapers", "saves", "savestates", "screenshots"] {
+    for subdir in ["roms", "bios", "media", "saves", "savestates", "screenshots"] {
         tokio::fs::create_dir_all(library_root.join(subdir)).await?;
+    }
+    let roms_dir = library_root.join("roms");
+    for system in systems::ALL {
+        tokio::fs::create_dir_all(roms_dir.join(system.id)).await?;
     }
     Ok(())
 }
@@ -89,8 +98,7 @@ pub async fn get_storage_usage(library_root: &Path) -> io::Result<StorageUsage> 
 
     let games_bytes = get_directory_size(library_root.join("roms")).await;
     let bios_bytes = get_directory_size(library_root.join("bios")).await;
-    let media_bytes = get_directory_size(library_root.join("media")).await
-        + get_directory_size(library_root.join("wallpapers")).await;
+    let media_bytes = get_directory_size(library_root.join("media")).await;
     let saves_bytes = get_directory_size(library_root.join("saves")).await
         + get_directory_size(library_root.join("savestates")).await
         + get_directory_size(library_root.join("screenshots")).await;
@@ -149,8 +157,20 @@ mod tests {
 
         ensure_library_dirs(&root).await.unwrap();
 
-        for subdir in ["roms", "bios", "media", "wallpapers", "saves", "savestates", "screenshots"] {
+        for subdir in ["roms", "bios", "media", "saves", "savestates", "screenshots"] {
             assert!(root.join(subdir).is_dir(), "expected {subdir} to exist");
+        }
+    }
+
+    #[tokio::test]
+    async fn ensure_library_dirs_creates_a_roms_subfolder_per_supported_system() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("Relay");
+
+        ensure_library_dirs(&root).await.unwrap();
+
+        for system in crate::systems::ALL {
+            assert!(root.join("roms").join(system.id).is_dir(), "expected roms/{} to exist", system.id);
         }
     }
 
@@ -177,7 +197,7 @@ mod tests {
         tokio::fs::write(root.join("media").join("box.png"), vec![0u8; 30]).await.unwrap();
         tokio::fs::create_dir_all(root.join("saves")).await.unwrap();
         tokio::fs::write(root.join("saves").join("game.srm"), vec![0u8; 10]).await.unwrap();
-        // bios/, wallpapers/, savestates/, screenshots/ deliberately left absent.
+        // bios/, savestates/, screenshots/ deliberately left absent.
 
         let usage = get_storage_usage(root).await.unwrap();
 

@@ -63,7 +63,7 @@ export function GameTile({ game, onFocusTile, onFocusChange }: GameTileProps) {
       <div
         ref={ref}
         className={cn(
-          "relative flex w-full opacity-70 outline-transparent aspect-2/3 shrink-0 flex-col justify-end overflow-hidden rounded-lg p-3 transition-bounce",
+          "relative flex w-full opacity-70 outline-transparent aspect-square shrink-0 flex-col justify-end overflow-hidden rounded-2xl p-3 transition-bounce",
           FOCUS_RING_BASE,
           focused && "outline-white scale-105 opacity-100",
         )}

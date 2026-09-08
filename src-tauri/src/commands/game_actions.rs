@@ -4,7 +4,7 @@ use sqlx::SqlitePool;
 use tauri::{AppHandle, Manager, State};
 
 use crate::db::{profiles, settings};
-use crate::game_actions::{self, AlternateMatch, GameAchievementsProgress};
+use crate::game_actions::{self, GameAchievementsProgress, ReidentifyCandidate};
 use crate::ingestion::identify::steamgriddb::SteamGridDbClient;
 use crate::ingestion::paths;
 use crate::retroachievements::client::RetroAchievementsClient;
@@ -38,16 +38,16 @@ async fn require_ra_credentials(app: &AppHandle, pool: &SqlitePool) -> Result<(R
 }
 
 #[tauri::command]
-pub async fn search_alternate_matches(pool: State<'_, SqlitePool>, game_id: String) -> Result<Vec<AlternateMatch>, String> {
+pub async fn search_for_reidentify(pool: State<'_, SqlitePool>, query: String) -> Result<Vec<ReidentifyCandidate>, String> {
     let client = require_steamgriddb_client(pool.inner()).await?;
-    game_actions::search_alternate_matches(&client, pool.inner(), &game_id).await.map_err(crate::logging::err_to_string)
+    game_actions::search_for_reidentify(&client, &query).await.map_err(crate::logging::err_to_string)
 }
 
 #[tauri::command]
-pub async fn apply_match(pool: State<'_, SqlitePool>, game_id: String, steamgriddb_id: i64, title: String) -> Result<(), String> {
+pub async fn apply_reidentify(pool: State<'_, SqlitePool>, game_id: String, steamgriddb_id: i64, title: String) -> Result<(), String> {
     let client = require_steamgriddb_client(pool.inner()).await?;
     let http = reqwest::Client::new();
-    game_actions::apply_match(&client, &http, pool.inner(), &paths::media_path(), &game_id, steamgriddb_id, &title)
+    game_actions::apply_reidentify(&client, &http, pool.inner(), &paths::media_path(), &game_id, steamgriddb_id, &title)
         .await
         .map_err(crate::logging::err_to_string)
 }

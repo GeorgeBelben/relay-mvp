@@ -12,10 +12,10 @@ const OPTIONS: { value: ControllerType; label: string }[] = [
 
 // The four icon sets differ subtly (which symbol sits on which face button) and there's no other
 // way to see that before committing to one -- the actual result only ever shows up later, in the
-// hint bar, on whatever screen you happened to navigate to next. Same card shape as
-// wallpaper-picker.tsx's Option (border highlight + focus ring), swapping its image thumbnail for
-// a live render of this brand's own confirm/back glyphs via the same getIconUrl lookup the hint
-// bar itself uses, so the preview can never drift out of sync with what players actually see.
+// hint bar, on whatever screen you happened to navigate to next. A card with a border highlight +
+// focus ring, showing a live render of this brand's own confirm/back glyphs via the same
+// getIconUrl lookup the hint bar itself uses, so the preview can never drift out of sync with what
+// players actually see.
 function Option({
   value,
   label,

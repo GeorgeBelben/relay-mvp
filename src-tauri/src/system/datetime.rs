@@ -7,12 +7,12 @@
 use std::process::Stdio;
 use std::time::Duration;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(10);
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DateTimeStatus {
     pub timezone: String,
     // Whether automatic sync is turned on at all (`timedatectl set-ntp`'s own state).

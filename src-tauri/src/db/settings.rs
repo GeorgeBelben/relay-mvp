@@ -74,7 +74,6 @@ pub struct GeneralSettings {
     pub controller_type: ControllerType,
     pub active_profile_id: Option<String>,
     pub retroarch_cores_path: String,
-    pub wallpaper: Option<String>,
     pub sound_volume: i64,
     pub rumble_enabled: bool,
     pub video_smooth: bool,
@@ -87,10 +86,9 @@ pub async fn get_general_settings(pool: &SqlitePool) -> Result<GeneralSettings, 
         onboarding_completed: get(pool, "onboardingCompleted").await?.as_deref() == Some("true"),
         controller_type: ControllerType::parse(get(pool, "controllerType").await?.as_deref().unwrap_or("xbox")),
         // "" means "no active profile" in the MVP's schema -- modeled as None here instead of a
-        // magic empty string, same reasoning as wallpaper below.
+        // magic empty string.
         active_profile_id: get(pool, "activeProfileId").await?.filter(|v| !v.is_empty()),
         retroarch_cores_path: get(pool, "retroarchCoresPath").await?.unwrap_or_else(|| DEFAULT_RETROARCH_CORES_PATH.to_string()),
-        wallpaper: get(pool, "wallpaper").await?.filter(|v| !v.is_empty()),
         sound_volume: get(pool, "soundVolume")
             .await?
             .and_then(|v| v.parse::<i64>().ok())
@@ -117,10 +115,6 @@ pub async fn set_active_profile_id(pool: &SqlitePool, value: Option<&str>) -> Re
 
 pub async fn set_retroarch_cores_path(pool: &SqlitePool, value: &str) -> Result<(), sqlx::Error> {
     set(pool, "retroarchCoresPath", value).await
-}
-
-pub async fn set_wallpaper(pool: &SqlitePool, value: Option<&str>) -> Result<(), sqlx::Error> {
-    set(pool, "wallpaper", value.unwrap_or("")).await
 }
 
 pub async fn set_sound_volume(pool: &SqlitePool, value: i64) -> Result<(), sqlx::Error> {
@@ -166,7 +160,6 @@ mod tests {
         assert_eq!(settings.controller_type, ControllerType::Xbox);
         assert_eq!(settings.active_profile_id, None);
         assert_eq!(settings.retroarch_cores_path, DEFAULT_RETROARCH_CORES_PATH);
-        assert_eq!(settings.wallpaper, None);
         assert_eq!(settings.sound_volume, DEFAULT_SOUND_VOLUME);
         assert!(settings.rumble_enabled);
         assert_eq!(settings.video_smooth, DEFAULT_VIDEO_SMOOTH);
@@ -182,7 +175,6 @@ mod tests {
         set_controller_type(&pool, ControllerType::Playstation).await.unwrap();
         set_active_profile_id(&pool, Some("profile-1")).await.unwrap();
         set_retroarch_cores_path(&pool, "/opt/retroarch/cores").await.unwrap();
-        set_wallpaper(&pool, Some("space.jpg")).await.unwrap();
         set_sound_volume(&pool, 42).await.unwrap();
         set_rumble_enabled(&pool, false).await.unwrap();
         set_video_smooth(&pool, true).await.unwrap();
@@ -195,7 +187,6 @@ mod tests {
         assert_eq!(settings.controller_type, ControllerType::Playstation);
         assert_eq!(settings.active_profile_id.as_deref(), Some("profile-1"));
         assert_eq!(settings.retroarch_cores_path, "/opt/retroarch/cores");
-        assert_eq!(settings.wallpaper.as_deref(), Some("space.jpg"));
         assert_eq!(settings.sound_volume, 42);
         assert!(!settings.rumble_enabled);
         assert!(settings.video_smooth);
@@ -204,17 +195,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn clearing_active_profile_id_and_wallpaper_round_trips_as_none() {
+    async fn clearing_active_profile_id_round_trips_as_none() {
         let (pool, _dir) = throwaway_pool().await;
 
         set_active_profile_id(&pool, Some("profile-1")).await.unwrap();
-        set_wallpaper(&pool, Some("space.jpg")).await.unwrap();
         set_active_profile_id(&pool, None).await.unwrap();
-        set_wallpaper(&pool, None).await.unwrap();
 
         let settings = get_general_settings(&pool).await.unwrap();
         assert_eq!(settings.active_profile_id, None);
-        assert_eq!(settings.wallpaper, None);
     }
 
     #[tokio::test]

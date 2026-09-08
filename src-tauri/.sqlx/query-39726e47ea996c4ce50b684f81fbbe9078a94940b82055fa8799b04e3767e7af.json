@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT roms.system_id FROM games JOIN roms ON games.rom_id = roms.id WHERE games.id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "system_id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "roms",
+            "name": "system_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "39726e47ea996c4ce50b684f81fbbe9078a94940b82055fa8799b04e3767e7af"
+}

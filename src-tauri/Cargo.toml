@@ -45,3 +45,6 @@ tauri = { version = "2", features = ["test"] }
 serde_json = "1"
 wiremock = "0.6"
 
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+toml = "1.1.5"
+

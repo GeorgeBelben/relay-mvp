@@ -48,7 +48,7 @@ function AllGames() {
         ) : games.length === 0 ? (
           <p className="px-8 text-sm text-muted-foreground">No games match "{query}".</p>
         ) : (
-          <div className="grid grid-cols-5 justify-center gap-8 px-16 pb-16">
+          <div className="grid grid-cols-6 justify-center gap-8 px-16 pb-16">
             {games.map((game) => (
               <GameTile key={game.id} game={game} onFocusChange={setGameFocused} />
             ))}

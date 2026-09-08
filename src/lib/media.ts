@@ -2,11 +2,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { useQuery } from "@tanstack/react-query";
 
-// game_media.local_path (LibraryGame.boxart_path) and wallpaper filenames are both stored/served
-// relative to a root directory on disk (see commands::game_media::get_media_root_path's and
-// system::wallpaper::list_wallpapers' own doc comments) -- resolving one into something an <img>
-// can load is deliberately left to the frontend. The root path itself barely ever changes, so it's
-// cached indefinitely rather than refetched per tile.
+// game_media.local_path (LibraryGame.boxart_path/backdrop_path) is stored/served relative to a
+// root directory on disk (see commands::game_media::get_media_root_path's own doc comment) --
+// resolving it into something an <img> can load is deliberately left to the frontend. The root
+// path itself barely ever changes, so it's cached indefinitely rather than refetched per tile.
 export function useMediaRoot(): string | undefined {
   const { data } = useQuery({
     queryKey: ["media", "root"],
@@ -18,19 +17,4 @@ export function useMediaRoot(): string | undefined {
 
 export function resolveMediaUrl(root: string, relativePath: string): string {
   return convertFileSrc(`${root}/${relativePath}`);
-}
-
-// ~/Relay itself, not the media subdirectory above -- wallpapers live in library_root/wallpapers,
-// a sibling of media/ (see commands::system::get_library_root_path's own doc comment).
-export function useLibraryRoot(): string | undefined {
-  const { data } = useQuery({
-    queryKey: ["library", "root"],
-    queryFn: () => invoke<string>("get_library_root_path"),
-    staleTime: Infinity,
-  });
-  return data;
-}
-
-export function resolveWallpaperUrl(libraryRoot: string, filename: string): string {
-  return resolveMediaUrl(libraryRoot, `wallpapers/${filename}`);
 }

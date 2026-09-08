@@ -7,6 +7,7 @@ use crate::db::{game_media, games};
 
 use super::identify::matching::best_match;
 use super::identify::steamgriddb::{SteamGridDbClient, SteamGridDbError};
+use super::paths;
 
 // A title has to be a very close match to get auto-applied -- a wrong cover is worse than no
 // cover, and titles this close together are effectively always the right game. Ported from the
@@ -15,7 +16,7 @@ const MATCH_THRESHOLD: f64 = 0.82;
 
 #[derive(Debug, PartialEq)]
 pub enum EnrichOutcome {
-    Matched { steamgriddb_id: i64, confidence: f64, boxart_downloaded: bool },
+    Matched { steamgriddb_id: i64, confidence: f64, boxart_downloaded: bool, backdrop_downloaded: bool },
     NoMatch,
 }
 
@@ -62,10 +63,11 @@ impl From<std::io::Error> for EnrichError {
 }
 
 /// Identifies and enriches exactly one game: searches SteamGridDB, applies the match threshold,
-/// writes the outcome back to the DB, and -- on a match -- downloads box art under
+/// writes the outcome back to the DB, and -- on a match -- downloads box art and a backdrop under
 /// `media_root/<system_id>/<game_id>/`. Ported from the Electron MVP's
-/// `enrichLibrary.ts#enrichOne`; the multi-game loop with rate-limiting and progress reporting is
-/// a separate concern (Tauri progress events) layered on top of this. `media_root` is threaded
+/// `enrichLibrary.ts#enrichOne` (backdrop downloading is new in this rewrite -- the Electron MVP
+/// only ever fetched box art); the multi-game loop with rate-limiting and progress reporting is a
+/// separate concern (Tauri progress events) layered on top of this. `media_root` is threaded
 /// through explicitly (rather than resolved internally) so tests can point it at a tempdir --
 /// production call sites pass `ingestion::paths::media_path()`.
 pub async fn enrich_one(
@@ -90,10 +92,11 @@ pub async fn enrich_one(
 
     games::mark_matched(pool, &game.id, steamgriddb_id, &matched_title, score).await?;
 
+    let dest_dir = paths::game_media_dir(media_root, &game.system_id, &game.id);
+
     let boxart_downloaded = match client.get_boxart_url(steamgriddb_id).await? {
         Some(boxart_url) => {
-            let dest_dir = media_root.join(&game.system_id).join(&game.id);
-            let local_path = download_boxart(http, &boxart_url, &dest_dir, media_root).await?;
+            let local_path = download_media_file(http, &boxart_url, &dest_dir, media_root, "boxart").await?;
             game_media::create(
                 pool,
                 game_media::NewGameMedia {
@@ -109,18 +112,45 @@ pub async fn enrich_one(
         None => false,
     };
 
-    Ok(EnrichOutcome::Matched { steamgriddb_id, confidence: score, boxart_downloaded })
+    let backdrop_downloaded = match client.get_backdrop_url(steamgriddb_id).await? {
+        Some(backdrop_url) => {
+            let local_path = download_media_file(http, &backdrop_url, &dest_dir, media_root, "backdrop").await?;
+            game_media::create(
+                pool,
+                game_media::NewGameMedia {
+                    game_id: game.id.clone(),
+                    kind: "backdrop".to_string(),
+                    local_path,
+                    source_url: Some(backdrop_url),
+                },
+            )
+            .await?;
+            true
+        }
+        None => false,
+    };
+
+    Ok(EnrichOutcome::Matched { steamgriddb_id, confidence: score, boxart_downloaded, backdrop_downloaded })
 }
 
-/// Downloads `url` into `dest_dir` as `boxart-<unix-timestamp><ext>` and returns the path stored
-/// in the database, relative to `media_root` and forward-slash-normalized -- it's read back into
-/// a URL later, not passed straight to the filesystem. The timestamped filename matters: a
-/// re-download that reused a fixed name would leave an `<img>`'s `src` unchanged across a swap,
-/// and browsers only refetch an image when `src` actually changes.
+/// Downloads `url` into `dest_dir` as `<filename_prefix>-<unix-timestamp><ext>` and returns the
+/// path stored in the database, relative to `media_root` and forward-slash-normalized -- it's read
+/// back into a URL later, not passed straight to the filesystem. The timestamped filename matters:
+/// a re-download that reused a fixed name would leave an `<img>`'s `src` unchanged across a swap,
+/// and browsers only refetch an image when `src` actually changes. `filename_prefix` is what
+/// distinguishes a game's box art from its backdrop within the same directory (`"boxart"` /
+/// `"backdrop"`) -- otherwise identical download logic for both.
 ///
-/// `pub(crate)` rather than private: `game_actions::apply_match` (a manual re-match, not part of
-/// the automatic enrichment pipeline) reuses this rather than duplicating the download logic.
-pub(crate) async fn download_boxart(http: &reqwest::Client, url: &str, dest_dir: &Path, media_root: &Path) -> Result<String, EnrichError> {
+/// `pub(crate)` rather than private: `game_actions::apply_reidentify` (a manual re-match, not
+/// part of the automatic enrichment pipeline) reuses this rather than duplicating the download
+/// logic.
+pub(crate) async fn download_media_file(
+    http: &reqwest::Client,
+    url: &str,
+    dest_dir: &Path,
+    media_root: &Path,
+    filename_prefix: &str,
+) -> Result<String, EnrichError> {
     let res = http.get(url).send().await?.error_for_status()?;
     let bytes = res.bytes().await?;
 
@@ -131,11 +161,11 @@ pub(crate) async fn download_boxart(http: &reqwest::Client, url: &str, dest_dir:
         .unwrap_or_else(|| ".png".to_string());
 
     tokio::fs::create_dir_all(dest_dir).await?;
-    let dest = dest_dir.join(format!("boxart-{}{ext}", now_unix()));
+    let dest = dest_dir.join(format!("{filename_prefix}-{}{ext}", now_unix()));
     tokio::fs::write(&dest, &bytes).await?;
 
     let relative = dest.strip_prefix(media_root).unwrap_or(&dest);
-    Ok(relative.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect::<Vec<_>>().join("/"))
+    Ok(paths::to_forward_slash(relative))
 }
 
 #[cfg(test)]
@@ -195,7 +225,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn enrich_one_marks_matched_and_downloads_boxart() {
+    async fn enrich_one_marks_matched_and_downloads_boxart_and_backdrop() {
         let (pool, _dir) = throwaway_pool().await;
         let game = seed_unenriched_game(&pool, "Chrono Trigger").await;
         let media_root = tempfile::tempdir().unwrap();
@@ -222,6 +252,19 @@ mod tests {
             .respond_with(ResponseTemplate::new(200).set_body_bytes(b"fake-png-bytes".to_vec()))
             .mount(&server)
             .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/heroes/game/99"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "success": true,
+                "data": [{ "id": 2, "url": format!("{}/images/backdrop.png", server.uri()) }],
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/images/backdrop.png"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(b"fake-backdrop-bytes".to_vec()))
+            .mount(&server)
+            .await;
 
         let client = SteamGridDbClient::with_base_url("test-key", &format!("{}/api/v2", server.uri()));
         let http = reqwest::Client::new();
@@ -229,7 +272,7 @@ mod tests {
         let outcome = enrich_one(&client, &http, &pool, &game, media_root.path()).await.unwrap();
         assert_eq!(
             outcome,
-            EnrichOutcome::Matched { steamgriddb_id: 99, confidence: 1.0, boxart_downloaded: true }
+            EnrichOutcome::Matched { steamgriddb_id: 99, confidence: 1.0, boxart_downloaded: true, backdrop_downloaded: true }
         );
 
         let stored = games_db::get(&pool, &game.id).await.unwrap().unwrap();
@@ -237,8 +280,12 @@ mod tests {
         assert!(stored.enriched_at.is_some());
 
         let media = game_media::list_for_game(&pool, &game.id).await.unwrap();
-        assert_eq!(media.len(), 1);
-        assert!(media[0].local_path.starts_with("snes/"));
-        assert!(media_root.path().join(&media[0].local_path).exists());
+        assert_eq!(media.len(), 2);
+        let boxart = media.iter().find(|m| m.kind == "boxart").expect("boxart row");
+        let backdrop = media.iter().find(|m| m.kind == "backdrop").expect("backdrop row");
+        assert!(boxart.local_path.starts_with("snes/"));
+        assert!(backdrop.local_path.starts_with("snes/"));
+        assert!(media_root.path().join(&boxart.local_path).exists());
+        assert!(media_root.path().join(&backdrop.local_path).exists());
     }
 }

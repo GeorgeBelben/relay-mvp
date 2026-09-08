@@ -1,5 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { FocusContext, useBackHandler, usePageFocus } from "@/lib/focus";
 import { useActionHints } from "@/lib/hints";
 import {
@@ -81,8 +82,17 @@ function ProfileDetail() {
               secret
               placeholder="Paste your Web API key"
               onCommit={(webApiKey) => {
-                if (!username) return;
-                linkWebApi.mutate({ profileId, username, webApiKey });
+                if (!username) {
+                  toast("Enter a username first");
+                  return;
+                }
+                linkWebApi.mutate(
+                  { profileId, username, webApiKey },
+                  // link_ra_web_api validates against RA's own API before persisting (see its own
+                  // doc comment) -- a bad key/network hiccup rejects invoke() with the Result<(),
+                  // String>'s Err value directly (a plain string, not an Error instance).
+                  { onError: (error) => toast(`Couldn't link Web API key: ${error instanceof Error ? error.message : String(error)}`) },
+                );
               }}
             />
             <TextFieldRow
@@ -91,8 +101,14 @@ function ProfileDetail() {
               secret
               placeholder="Enter your RA password to link"
               onCommit={(password) => {
-                if (!username) return;
-                linkConnectAccount.mutate({ profileId, username, password });
+                if (!username) {
+                  toast("Enter a username first");
+                  return;
+                }
+                linkConnectAccount.mutate(
+                  { profileId, username, password },
+                  { onError: (error) => toast(`Couldn't link RetroAchievements: ${error instanceof Error ? error.message : String(error)}`) },
+                );
               }}
             />
             {(profile.has_web_api_link || profile.has_connect_link) && (

@@ -12,8 +12,10 @@ pub struct SteamGridDbGame {
     pub name: String,
 }
 
+// Shared response shape for both "grids" (box art) and "heroes" (backdrops) -- both endpoints
+// return `data: [{ url, ... }]`, only `url` is ever deserialized.
 #[derive(Debug, Deserialize)]
-struct SteamGridDbGrid {
+struct SteamGridDbImage {
     url: String,
 }
 
@@ -96,8 +98,19 @@ impl SteamGridDbClient {
         url.path_segments_mut().unwrap().extend(["grids", "game", &game_id.to_string()]);
         url.query_pairs_mut().append_pair("dimensions", "600x900");
 
-        let grids: Vec<SteamGridDbGrid> = self.request(url).await?;
+        let grids: Vec<SteamGridDbImage> = self.request(url).await?;
         Ok(grids.into_iter().next().map(|g| g.url))
+    }
+
+    /// Wide "hero" art -- backs a game's background/backdrop. Unlike grids, heroes has no
+    /// dimensions worth constraining to (uploads are already a fairly consistent widescreen
+    /// aspect ratio) -- picks the first result, or `None` if nobody's uploaded one.
+    pub async fn get_backdrop_url(&self, game_id: i64) -> Result<Option<String>, SteamGridDbError> {
+        let mut url = self.base_url.clone();
+        url.path_segments_mut().unwrap().extend(["heroes", "game", &game_id.to_string()]);
+
+        let heroes: Vec<SteamGridDbImage> = self.request(url).await?;
+        Ok(heroes.into_iter().next().map(|h| h.url))
     }
 }
 
@@ -158,6 +171,40 @@ mod tests {
 
         let client = SteamGridDbClient::with_base_url("test-key", &format!("{}/api/v2", server.uri()));
         assert_eq!(client.get_boxart_url(42).await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn get_backdrop_url_returns_first_hero_url() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/heroes/game/42"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "success": true,
+                "data": [{ "id": 1, "url": "https://example.com/backdrop.png" }],
+            })))
+            .mount(&server)
+            .await;
+
+        let client = SteamGridDbClient::with_base_url("test-key", &format!("{}/api/v2", server.uri()));
+        let url = client.get_backdrop_url(42).await.unwrap();
+
+        assert_eq!(url.as_deref(), Some("https://example.com/backdrop.png"));
+    }
+
+    #[tokio::test]
+    async fn get_backdrop_url_returns_none_when_no_heroes_exist() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/heroes/game/42"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "success": true,
+                "data": [],
+            })))
+            .mount(&server)
+            .await;
+
+        let client = SteamGridDbClient::with_base_url("test-key", &format!("{}/api/v2", server.uri()));
+        assert_eq!(client.get_backdrop_url(42).await.unwrap(), None);
     }
 
     #[tokio::test]

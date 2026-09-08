@@ -1,31 +1,58 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-// Mirrors src-tauri/src/game_actions.rs's AlternateMatch -- boxart_url here is the *remote*
-// SteamGridDB image, straight from their CDN, for preview only. Nothing's downloaded or
-// persisted until the user actually picks one (see useApplyMatch).
-export type AlternateMatch = {
+// Mirrors src-tauri/src/game_actions.rs's ReidentifyCandidate -- boxart_url here is the *remote*
+// SteamGridDB image, straight from their CDN, for preview only. Nothing's downloaded or persisted
+// until the user actually picks one (see useApplyReidentify).
+export type ReidentifyCandidate = {
   steamgriddb_id: number;
   title: string;
   boxart_url: string | null;
 };
 
-// Both actions here are on-demand and one-shot (opening the "change box art" drawer, then picking
-// a result) rather than passive derived state, so mutations fit better than a query with a stable
-// cache key -- same reasoning as useCreateGame/useRescan elsewhere in this file set.
-export function useSearchAlternateMatches() {
+// A free-text search (not tied to a game_id -- the caller supplies whatever query it wants,
+// typically prefilled from the game's scanned_title but freely editable), so a mutation rather
+// than a query with a stable cache key fits the same one-shot, on-demand shape as useCreateGame/
+// useRescan elsewhere in this file set.
+export function useSearchForReidentify() {
   return useMutation({
-    mutationFn: (gameId: string) => invoke<AlternateMatch[]>("search_alternate_matches", { gameId }),
+    mutationFn: (query: string) => invoke<ReidentifyCandidate[]>("search_for_reidentify", { query }),
   });
 }
 
-export function useApplyMatch() {
+export function useApplyReidentify() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (args: { gameId: string; steamgriddbId: number; title: string }) =>
-      invoke<void>("apply_match", { gameId: args.gameId, steamgriddbId: args.steamgriddbId, title: args.title }),
+      invoke<void>("apply_reidentify", { gameId: args.gameId, steamgriddbId: args.steamgriddbId, title: args.title }),
     onSuccess: () => {
-      // Applying a match changes the game's title/boxart, which every library view surfaces.
+      // Reidentifying changes the game's title/boxart, which every library view surfaces.
+      queryClient.invalidateQueries({ queryKey: ["games"] });
+      queryClient.invalidateQueries({ queryKey: ["library"] });
+    },
+  });
+}
+
+// Every image file currently sitting in this game's media folder -- whether it got there via
+// auto-enrich, a reidentify, or the user dropping it in directly via the filesystem. A real query
+// (not a mutation): passive, refetched every time the Artwork view opens (`refetchOnMount:
+// "always"`) since files can appear there without this app's involvement.
+export function useListGameMediaFiles(gameId: string) {
+  return useQuery({
+    queryKey: ["game-media-files", gameId],
+    queryFn: () => invoke<string[]>("list_game_media_files", { gameId }),
+    refetchOnMount: "always",
+  });
+}
+
+// Points a game's active box art at a file already in its media folder -- no download, no network
+// call, just a DB row update (see game_media_files::select_boxart_file).
+export function useSelectBoxartFile() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { gameId: string; filename: string }) =>
+      invoke<void>("select_boxart_file", { gameId: args.gameId, filename: args.filename }),
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["games"] });
       queryClient.invalidateQueries({ queryKey: ["library"] });
     },

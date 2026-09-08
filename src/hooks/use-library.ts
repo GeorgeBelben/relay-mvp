@@ -11,6 +11,7 @@ export type LibraryGame = {
   system_id: string;
   system_name: string;
   boxart_path: string | null;
+  backdrop_path: string | null;
   beaten: boolean;
   added_at: number;
 };

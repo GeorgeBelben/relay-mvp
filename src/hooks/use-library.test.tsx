@@ -21,6 +21,7 @@ function makeGame(overrides: Partial<LibraryGame>): LibraryGame {
     system_id: "snes",
     system_name: "SNES",
     boxart_path: null,
+    backdrop_path: null,
     beaten: false,
     added_at: 0,
     ...overrides,

@@ -142,6 +142,15 @@ pub async fn update(pool: &SqlitePool, id: &str, title: &str) -> Result<Game, sq
     .await
 }
 
+/// A game's media folder is keyed on `<system_id>/<game_id>` (see ingestion::paths::game_media_dir),
+/// but `system_id` lives on the rom, not the game -- this is the one-step join every call site that
+/// needs to build that path wants, instead of a `games::get` + `roms::get` pair.
+pub async fn system_id_for_game(pool: &SqlitePool, id: &str) -> Result<Option<String>, sqlx::Error> {
+    sqlx::query_scalar!(r#"SELECT roms.system_id FROM games JOIN roms ON games.rom_id = roms.id WHERE games.id = ?"#, id)
+        .fetch_optional(pool)
+        .await
+}
+
 #[derive(Debug, PartialEq)]
 pub struct UnenrichedGame {
     pub id: String,

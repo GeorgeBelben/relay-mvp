@@ -2,6 +2,7 @@ pub mod commands;
 pub mod db;
 pub mod emulator;
 pub mod game_actions;
+pub mod game_media_files;
 pub mod ingestion;
 pub mod logging;
 pub mod retroachievements;
@@ -109,7 +110,6 @@ pub fn run() {
             commands::settings::set_controller_type,
             commands::settings::set_active_profile_id,
             commands::settings::set_retroarch_cores_path,
-            commands::settings::set_wallpaper,
             commands::settings::set_sound_volume,
             commands::settings::set_rumble_enabled,
             commands::settings::set_video_smooth,
@@ -134,17 +134,19 @@ pub fn run() {
             commands::profiles::refresh_ra_stats,
             commands::game_media::list_game_media,
             commands::game_media::get_media_root_path,
+            commands::game_media::list_game_media_files,
+            commands::game_media::select_boxart_file,
             commands::library::list_library_shelves,
             commands::library::list_all_games_in_library,
             commands::library::list_recently_added_games,
-            commands::game_actions::search_alternate_matches,
-            commands::game_actions::apply_match,
+            commands::game_actions::search_for_reidentify,
+            commands::game_actions::apply_reidentify,
             commands::game_actions::get_achievements,
             commands::system::get_username,
-            commands::system::get_library_root_path,
-            commands::system::list_wallpapers,
             commands::system::quit,
             commands::system::hide_cursor,
+            commands::system::shutdown_device,
+            commands::system::reboot_device,
             commands::datetime::get_datetime_status,
             commands::datetime::list_timezones,
             commands::datetime::set_timezone,

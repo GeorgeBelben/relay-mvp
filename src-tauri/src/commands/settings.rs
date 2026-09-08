@@ -39,11 +39,6 @@ pub async fn set_retroarch_cores_path(pool: State<'_, SqlitePool>, path: String)
 }
 
 #[tauri::command]
-pub async fn set_wallpaper(pool: State<'_, SqlitePool>, wallpaper: Option<String>) -> Result<(), String> {
-    settings::set_wallpaper(pool.inner(), wallpaper.as_deref()).await.map_err(crate::logging::err_to_string)
-}
-
-#[tauri::command]
 pub async fn set_sound_volume(pool: State<'_, SqlitePool>, volume: i64) -> Result<(), String> {
     settings::set_sound_volume(pool.inner(), volume).await.map_err(crate::logging::err_to_string)
 }

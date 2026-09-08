@@ -7,22 +7,23 @@ use std::path::Path;
 use serde::Serialize;
 use sqlx::SqlitePool;
 
-use crate::db::{game_media, games, roms};
-use crate::ingestion::enrich::{download_boxart, EnrichError};
+use crate::db::{game_media, games};
+use crate::ingestion::enrich::{download_media_file, EnrichError};
 use crate::ingestion::identify::steamgriddb::{SteamGridDbClient, SteamGridDbError};
+use crate::ingestion::paths;
 use crate::retroachievements::client::{badge_url, RaError, RetroAchievementsClient};
 
 // A manually-picked match is as confident as it gets -- distinct from enrich.rs's auto-match,
 // which scores against a threshold since nobody's confirmed it by eye.
 const MANUAL_MATCH_CONFIDENCE: f64 = 1.0;
 
-// Alternate box art candidates aren't downloaded until one's actually picked (see apply_match) --
-// this only needs enough of each to render a picker, so cap how many candidates get a grid
-// lookup rather than firing one per search result.
-const MAX_ALTERNATES: usize = 8;
+// Reidentify candidates' box art isn't downloaded until one's actually picked (see
+// apply_reidentify) -- this only needs enough of each to render a search-result grid, so cap how
+// many candidates get a grid lookup rather than firing one per search result.
+const MAX_REIDENTIFY_RESULTS: usize = 8;
 
 #[derive(Debug, Serialize)]
-pub struct AlternateMatch {
+pub struct ReidentifyCandidate {
     pub steamgriddb_id: i64,
     pub title: String,
     pub boxart_url: Option<String>,
@@ -104,19 +105,14 @@ impl From<EnrichError> for GameActionsError {
     }
 }
 
-/// Re-searches SteamGridDB by the game's *filename-derived* title, not its current (possibly
-/// wrong) matched title -- backs the drawer's "Change Box Art" picker, for when the automatic
-/// match picked the wrong game. Searching by the current title would be self-defeating: once a
-/// bad match has landed, that title IS the bad match's name, so re-running the search on it just
-/// re-fetches the same (or similarly wrong) candidates. `scanned_title` tracks the actual filename
-/// regardless of match status; falls back to `title` only for a game whose `scanned_title` predates
-/// that column and hasn't had a rescan since.
-pub async fn search_alternate_matches(client: &SteamGridDbClient, pool: &SqlitePool, game_id: &str) -> Result<Vec<AlternateMatch>, GameActionsError> {
-    let game = games::get(pool, game_id).await?.ok_or(GameActionsError::GameNotFound)?;
-    let search_title = game.scanned_title.as_deref().unwrap_or(&game.title);
-
-    let candidates = client.search_games(search_title).await?;
-    let candidates = candidates.into_iter().take(MAX_ALTERNATES);
+/// Free-text search against SteamGridDB -- backs the drawer's "Reidentify" flow, for when the
+/// automatic match picked the wrong game (or none at all). The frontend owns what query to send
+/// (typically prefilled from the game's filename-derived `scanned_title`, but freely editable --
+/// searching by a bad match's own current title would be self-defeating, since that title IS the
+/// bad match's name), so this takes the query directly rather than resolving one from a game_id.
+pub async fn search_for_reidentify(client: &SteamGridDbClient, query: &str) -> Result<Vec<ReidentifyCandidate>, GameActionsError> {
+    let candidates = client.search_games(query).await?;
+    let candidates = candidates.into_iter().take(MAX_REIDENTIFY_RESULTS);
 
     // One request per candidate for its preview art, in parallel -- fine here (a handful,
     // user-initiated, latency-sensitive), unlike enrich.rs's bulk pass which deliberately paces
@@ -126,7 +122,7 @@ pub async fn search_alternate_matches(client: &SteamGridDbClient, pool: &SqliteP
         let client = client.clone();
         tokio::spawn(async move {
             let boxart_url = client.get_boxart_url(candidate.id).await.unwrap_or(None);
-            AlternateMatch { steamgriddb_id: candidate.id, title: candidate.name, boxart_url }
+            ReidentifyCandidate { steamgriddb_id: candidate.id, title: candidate.name, boxart_url }
         })
     });
 
@@ -137,10 +133,17 @@ pub async fn search_alternate_matches(client: &SteamGridDbClient, pool: &SqliteP
     Ok(matches)
 }
 
-/// Downloads the chosen candidate's box art and applies it, overwriting whatever match/art this
-/// game had before (see `ingestion::enrich::enrich_one` for the equivalent automatic-match path).
+/// Applies a chosen reidentify candidate: re-points the game's identity (steamgriddb_id/title/
+/// confidence) and seeds its media folder with that game's default SteamGridDB box art and
+/// backdrop, each as a *new* timestamped file (see `download_media_file`), which become the active
+/// box art/backdrop. This never touches any other file already in the folder -- a user's own
+/// dropped-in images survive a reidentify, they just stop being the active selection until
+/// re-picked via the Artwork view (see `game_media_files::select_boxart_file`). Mirrors
+/// `ingestion::enrich::enrich_one`'s automatic equivalent, just manually triggered and
+/// unconditionally confident (`MANUAL_MATCH_CONFIDENCE`). Box art and backdrop are independent --
+/// a missing one doesn't skip the other.
 #[allow(clippy::too_many_arguments)]
-pub async fn apply_match(
+pub async fn apply_reidentify(
     client: &SteamGridDbClient,
     http: &reqwest::Client,
     pool: &SqlitePool,
@@ -149,18 +152,21 @@ pub async fn apply_match(
     steamgriddb_id: i64,
     title: &str,
 ) -> Result<(), GameActionsError> {
-    let game = games::get(pool, game_id).await?.ok_or(GameActionsError::GameNotFound)?;
-    let rom = roms::get(pool, &game.rom_id).await?.ok_or(GameActionsError::GameNotFound)?;
+    let system_id = games::system_id_for_game(pool, game_id).await?.ok_or(GameActionsError::GameNotFound)?;
 
     games::mark_matched(pool, game_id, steamgriddb_id, title, MANUAL_MATCH_CONFIDENCE).await?;
 
-    let Some(boxart_url) = client.get_boxart_url(steamgriddb_id).await? else {
-        return Ok(());
-    };
+    let dest_dir = paths::game_media_dir(media_root, &system_id, game_id);
 
-    let dest_dir = media_root.join(&rom.system_id).join(game_id);
-    let local_path = download_boxart(http, &boxart_url, &dest_dir, media_root).await?;
-    game_media::upsert_boxart(pool, game_id, &local_path, &boxart_url).await?;
+    if let Some(boxart_url) = client.get_boxart_url(steamgriddb_id).await? {
+        let local_path = download_media_file(http, &boxart_url, &dest_dir, media_root, "boxart").await?;
+        game_media::upsert_boxart(pool, game_id, &local_path, Some(&boxart_url)).await?;
+    }
+
+    if let Some(backdrop_url) = client.get_backdrop_url(steamgriddb_id).await? {
+        let local_path = download_media_file(http, &backdrop_url, &dest_dir, media_root, "backdrop").await?;
+        game_media::upsert_backdrop(pool, game_id, &local_path, Some(&backdrop_url)).await?;
+    }
 
     Ok(())
 }
@@ -169,7 +175,7 @@ pub async fn apply_match(
 /// outcome (unsupported system, no RA entry for this ROM, or the auto-match pass just hasn't run
 /// yet -- see `retroachievements::client`'s own module doc for why nothing populates
 /// `retroachievements_game_id` yet), not an error. Missing/invalid credentials *do* propagate as an
-/// error, same as `search_alternate_matches`' missing-API-key case -- that's a real,
+/// error, same as `search_for_reidentify`'s missing-API-key case -- that's a real,
 /// user-actionable configuration gap, not a per-game state.
 pub async fn get_achievements(
     client: &RetroAchievementsClient,
@@ -236,15 +242,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn search_alternate_matches_searches_by_scanned_title_not_current_title() {
-        let (pool, _dir) = throwaway_pool().await;
-        let game_id = seed_game(&pool, "Chrono Trigger").await;
-        // Simulate a bad automatic match: title has drifted from the filename-derived scanned_title.
-        sqlx::query!("UPDATE games SET title = 'Wrong Game', scanned_title = 'chrono trigger (usa)' WHERE id = ?", game_id)
-            .execute(&pool)
-            .await
-            .unwrap();
-
+    async fn search_for_reidentify_searches_whatever_query_its_given() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/api/v2/search/autocomplete/chrono%20trigger%20(usa)"))
@@ -264,7 +262,7 @@ mod tests {
             .await;
 
         let client = SteamGridDbClient::with_base_url("test-key", &format!("{}/api/v2", server.uri()));
-        let matches = search_alternate_matches(&client, &pool, &game_id).await.unwrap();
+        let matches = search_for_reidentify(&client, "chrono trigger (usa)").await.unwrap();
 
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].steamgriddb_id, 99);
@@ -273,10 +271,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn search_alternate_matches_caps_at_max_alternates_and_tolerates_a_failed_boxart_lookup() {
-        let (pool, _dir) = throwaway_pool().await;
-        let game_id = seed_game(&pool, "Many Results").await;
-
+    async fn search_for_reidentify_caps_at_max_results_and_tolerates_a_failed_boxart_lookup() {
         let candidates: Vec<_> = (0..10).map(|i| serde_json::json!({ "id": i, "name": format!("Result {i}") })).collect();
         let server = MockServer::start().await;
         Mock::given(method("GET"))
@@ -288,9 +283,9 @@ mod tests {
         Mock::given(method("GET")).and(path_regex_grids()).respond_with(ResponseTemplate::new(404)).mount(&server).await;
 
         let client = SteamGridDbClient::with_base_url("test-key", &format!("{}/api/v2", server.uri()));
-        let matches = search_alternate_matches(&client, &pool, &game_id).await.unwrap();
+        let matches = search_for_reidentify(&client, "Many Results").await.unwrap();
 
-        assert_eq!(matches.len(), MAX_ALTERNATES);
+        assert_eq!(matches.len(), MAX_REIDENTIFY_RESULTS);
         assert!(matches.iter().all(|m| m.boxart_url.is_none()));
     }
 
@@ -298,17 +293,12 @@ mod tests {
         wiremock::matchers::path_regex(r"^/api/v2/grids/game/\d+$")
     }
 
-    #[tokio::test]
-    async fn search_alternate_matches_returns_game_not_found_for_an_unknown_id() {
-        let (pool, _dir) = throwaway_pool().await;
-        let client = SteamGridDbClient::with_base_url("test-key", "http://localhost:1");
-
-        let err = search_alternate_matches(&client, &pool, "nope").await.unwrap_err();
-        assert!(matches!(err, GameActionsError::GameNotFound));
+    fn path_regex_heroes() -> wiremock::matchers::PathRegexMatcher {
+        wiremock::matchers::path_regex(r"^/api/v2/heroes/game/\d+$")
     }
 
     #[tokio::test]
-    async fn apply_match_marks_matched_and_downloads_boxart() {
+    async fn apply_reidentify_marks_matched_and_downloads_boxart_and_backdrop() {
         let (pool, _dir) = throwaway_pool().await;
         let game_id = seed_game(&pool, "Some Filename Title").await;
         let media_root = tempfile::tempdir().unwrap();
@@ -327,11 +317,24 @@ mod tests {
             .respond_with(ResponseTemplate::new(200).set_body_bytes(b"fake-png-bytes".to_vec()))
             .mount(&server)
             .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/heroes/game/99"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "success": true,
+                "data": [{ "id": 2, "url": format!("{}/images/backdrop.png", server.uri()) }],
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/images/backdrop.png"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(b"fake-backdrop-bytes".to_vec()))
+            .mount(&server)
+            .await;
 
         let client = SteamGridDbClient::with_base_url("test-key", &format!("{}/api/v2", server.uri()));
         let http = reqwest::Client::new();
 
-        apply_match(&client, &http, &pool, media_root.path(), &game_id, 99, "Chrono Trigger").await.unwrap();
+        apply_reidentify(&client, &http, &pool, media_root.path(), &game_id, 99, "Chrono Trigger").await.unwrap();
 
         let stored = games::get(&pool, &game_id).await.unwrap().unwrap();
         assert_eq!(stored.steamgriddb_id, Some(99));
@@ -339,12 +342,15 @@ mod tests {
         assert_eq!(stored.match_confidence, Some(MANUAL_MATCH_CONFIDENCE));
 
         let media = game_media::list_for_game(&pool, &game_id).await.unwrap();
-        assert_eq!(media.len(), 1);
-        assert!(media[0].local_path.starts_with("snes/"));
+        assert_eq!(media.len(), 2);
+        let boxart = media.iter().find(|m| m.kind == "boxart").expect("boxart row");
+        let backdrop = media.iter().find(|m| m.kind == "backdrop").expect("backdrop row");
+        assert!(boxart.local_path.starts_with("snes/"));
+        assert!(backdrop.local_path.starts_with("snes/"));
     }
 
     #[tokio::test]
-    async fn apply_match_replaces_rather_than_duplicates_an_existing_boxart_row() {
+    async fn apply_reidentify_replaces_rather_than_duplicates_an_existing_boxart_row() {
         let (pool, _dir) = throwaway_pool().await;
         let game_id = seed_game(&pool, "Some Filename Title").await;
         let media_root = tempfile::tempdir().unwrap();
@@ -365,29 +371,36 @@ mod tests {
                 .mount(&server)
                 .await;
         }
+        // No heroes uploaded for either candidate -- exercises the "boxart present, backdrop
+        // absent" independence, not just the replace-not-duplicate boxart behavior below.
+        Mock::given(method("GET"))
+            .and(path_regex_heroes())
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "success": true, "data": [] })))
+            .mount(&server)
+            .await;
 
         let client = SteamGridDbClient::with_base_url("test-key", &format!("{}/api/v2", server.uri()));
         let http = reqwest::Client::new();
 
-        apply_match(&client, &http, &pool, media_root.path(), &game_id, 1, "First Match").await.unwrap();
-        apply_match(&client, &http, &pool, media_root.path(), &game_id, 2, "Second Match").await.unwrap();
+        apply_reidentify(&client, &http, &pool, media_root.path(), &game_id, 1, "First Match").await.unwrap();
+        apply_reidentify(&client, &http, &pool, media_root.path(), &game_id, 2, "Second Match").await.unwrap();
 
         let stored = games::get(&pool, &game_id).await.unwrap().unwrap();
         assert_eq!(stored.title, "Second Match");
 
         let media = game_media::list_for_game(&pool, &game_id).await.unwrap();
-        assert_eq!(media.len(), 1, "re-applying a match should replace the boxart row, not add a second one");
+        assert_eq!(media.len(), 1, "reidentifying should replace the boxart row, not add a second one");
         assert!(media[0].source_url.as_deref().unwrap().ends_with("second.png"));
     }
 
     #[tokio::test]
-    async fn apply_match_returns_game_not_found_for_an_unknown_id() {
+    async fn apply_reidentify_returns_game_not_found_for_an_unknown_id() {
         let (pool, _dir) = throwaway_pool().await;
         let media_root = tempfile::tempdir().unwrap();
         let client = SteamGridDbClient::with_base_url("test-key", "http://localhost:1");
         let http = reqwest::Client::new();
 
-        let err = apply_match(&client, &http, &pool, media_root.path(), "nope", 1, "Title").await.unwrap_err();
+        let err = apply_reidentify(&client, &http, &pool, media_root.path(), "nope", 1, "Title").await.unwrap_err();
         assert!(matches!(err, GameActionsError::GameNotFound));
     }
 

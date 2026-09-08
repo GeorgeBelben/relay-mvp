@@ -7,7 +7,7 @@
 use std::process::Stdio;
 use std::time::Duration;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 
 // nmcli's own default association wait is 90s (`man nmcli`) -- far too long to leave the Settings
@@ -44,7 +44,7 @@ pub fn parse_terse_line(line: &str) -> Vec<String> {
     fields
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WifiNetwork {
     pub ssid: String,
     pub signal: i64,

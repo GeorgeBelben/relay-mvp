@@ -1,15 +1,6 @@
 use tauri::{AppHandle, Manager};
 
-use crate::ingestion::paths;
-use crate::system::wallpaper;
-
-/// The frontend needs this to build a loadable URL for a wallpaper filename (asset-protocol scope
-/// + `library_root()/wallpapers/<filename>`) -- same reasoning, and same shape, as
-/// `commands::game_media::get_media_root_path`'s own doc comment for box art.
-#[tauri::command]
-pub fn get_library_root_path() -> String {
-    paths::library_root().to_string_lossy().into_owned()
-}
+use crate::system::provider::{ActiveSystemProvider, SystemProvider};
 
 /// There's no profile/auth system for OS-level login -- the real Linux account name is a more
 /// honest placeholder for "currently logged in user" than a fake one, and it's free. Reads $USER
@@ -19,11 +10,6 @@ pub fn get_library_root_path() -> String {
 #[tauri::command]
 pub fn get_username() -> String {
     std::env::var("USER").unwrap_or_else(|_| "user".to_string())
-}
-
-#[tauri::command]
-pub async fn list_wallpapers() -> Vec<String> {
-    wallpaper::list_wallpapers().await
 }
 
 /// The kiosk systemd unit runs this app as the only thing on screen, no desktop environment
@@ -42,4 +28,20 @@ pub fn quit(app: AppHandle) {
 pub fn hide_cursor(app: AppHandle) -> Result<(), String> {
     let window = app.get_webview_window("main").ok_or("main window must exist")?;
     window.set_cursor_visible(false).map_err(crate::logging::err_to_string)
+}
+
+/// Power Menu's "Shut Down" -- powers off the physical device (`systemctl poweroff`), not just
+/// this app. Needs a polkit rule on the device granting the kiosk account passwordless
+/// `org.freedesktop.login1.power-off` (see system::power's module doc) -- without it this returns
+/// a permission-denied error rather than silently no-oping.
+#[tauri::command]
+pub async fn shutdown_device() -> Result<(), String> {
+    ActiveSystemProvider::default().shutdown_device().await
+}
+
+/// Power Menu's "Reboot" -- restarts the physical device (`systemctl reboot`). Same polkit
+/// prerequisite as `shutdown_device`.
+#[tauri::command]
+pub async fn reboot_device() -> Result<(), String> {
+    ActiveSystemProvider::default().reboot_device().await
 }

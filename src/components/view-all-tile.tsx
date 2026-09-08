@@ -41,7 +41,7 @@ export function ViewAllTile({ onTileFocus, onFocusTile, scrollContainerRef }: Vi
     <div
       ref={ref}
       className={cn(
-        "flex aspect-2/3 shrink-0 flex-col items-center justify-center gap-1 rounded-lg bg-gray-900 transition-bounce",
+        "flex aspect-square shrink-0 flex-col items-center justify-center gap-1 rounded-lg bg-gray-900 transition-bounce",
         CAROUSEL_TILE_WIDTH,
         focused ? cn("bg-gray-800 text-white scale-110") : "text-gray-300",
       )}
