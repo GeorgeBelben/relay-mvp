@@ -1,0 +1,27 @@
+name: Build Dev
+
+# Manually-triggered build for on-device testing (see scripts/deploy.sh). Produces a
+# relay-cli binary artifact without cutting a version tag / release.
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --release -p relay-cli
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: relay-cli
+          path: target/release/relay-cli
+          retention-days: 7
