@@ -1,7 +1,6 @@
+use relay_core::db::games::{self, Game, NewGame};
 use sqlx::SqlitePool;
 use tauri::State;
-
-use crate::db::games::{self, Game, NewGame};
 
 #[tauri::command]
 pub async fn list_games(pool: State<'_, SqlitePool>) -> Result<Vec<Game>, String> {

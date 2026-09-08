@@ -1,5 +1,5 @@
-use crate::system::datetime::DateTimeStatus;
-use crate::system::provider::{ActiveSystemProvider, SystemProvider};
+use relay_core::system::datetime::DateTimeStatus;
+use relay_core::system::provider::{ActiveSystemProvider, SystemProvider};
 
 #[tauri::command]
 pub async fn get_datetime_status() -> Result<DateTimeStatus, String> {

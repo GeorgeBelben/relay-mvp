@@ -1,5 +1,5 @@
-use crate::system::bluetooth::{BluetoothDevice, BluetoothPairError};
-use crate::system::provider::{ActiveSystemProvider, SystemProvider};
+use relay_core::system::bluetooth::{BluetoothDevice, BluetoothPairError};
+use relay_core::system::provider::{ActiveSystemProvider, SystemProvider};
 
 #[tauri::command]
 pub async fn scan_for_bluetooth_devices() -> Result<Vec<BluetoothDevice>, String> {

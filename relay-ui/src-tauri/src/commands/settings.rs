@@ -1,7 +1,6 @@
+use relay_core::db::settings::{self, ControllerType, GeneralSettings};
 use sqlx::SqlitePool;
 use tauri::State;
-
-use crate::db::settings::{self, ControllerType, GeneralSettings};
 
 #[tauri::command]
 pub async fn get_setting(pool: State<'_, SqlitePool>, key: String) -> Result<Option<String>, String> {

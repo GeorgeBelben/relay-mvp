@@ -1,7 +1,6 @@
+use relay_core::db::roms::{self, NewRom, Rom};
 use sqlx::SqlitePool;
 use tauri::State;
-
-use crate::db::roms::{self, NewRom, Rom};
 
 #[tauri::command]
 pub async fn list_roms(pool: State<'_, SqlitePool>) -> Result<Vec<Rom>, String> {

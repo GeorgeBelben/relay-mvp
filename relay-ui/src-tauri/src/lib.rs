@@ -1,14 +1,5 @@
 pub mod commands;
-pub mod db;
-pub mod emulator;
-pub mod game_actions;
-pub mod game_media_files;
-pub mod ingestion;
 pub mod logging;
-pub mod retroachievements;
-pub mod secrets;
-pub mod system;
-pub mod systems;
 
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use tauri::Manager;
@@ -32,28 +23,19 @@ pub fn run() {
         .setup(|app| {
             let app_handle = app.handle().clone();
             tauri::async_runtime::block_on(async move {
-                let data_dir = app_handle
-                    .path()
-                    .app_data_dir()
-                    .expect("failed to resolve app data dir");
-                std::fs::create_dir_all(&data_dir).expect("failed to create app data dir");
-
-                let options = SqliteConnectOptions::new()
-                    .filename(data_dir.join("relay.db"))
-                    .create_if_missing(true);
-                let pool = SqlitePoolOptions::new()
-                    .connect_with(options)
+                // relay_core::init::ensure_environment resolves/creates the app data dir, opens
+                // the DB, runs migrations, and ensures the full ~/Relay tree -- everything the
+                // Tauri setup used to do inline here by hand. It doesn't hand back a pool (it
+                // opens and drops its own internally), so we connect a second one against the
+                // same file to hold in Tauri state -- SQLite is fine with multiple connections
+                // to one file, and migrations are already applied by the time this runs.
+                let report = relay_core::init::ensure_environment()
                     .await
-                    .expect("failed to connect to database");
+                    .expect("failed to set up relay-core environment");
 
-                sqlx::migrate!("./migrations")
-                    .run(&pool)
-                    .await
-                    .expect("failed to run migrations");
-
-                system::storage::ensure_library_dirs(&ingestion::paths::library_root())
-                    .await
-                    .expect("failed to create library directories");
+                let db_path = report.data_dir.join("relay.db");
+                let options = SqliteConnectOptions::new().filename(&db_path).create_if_missing(true);
+                let pool = SqlitePoolOptions::new().connect_with(options).await.expect("failed to connect to database");
 
                 app_handle.manage(pool);
             });

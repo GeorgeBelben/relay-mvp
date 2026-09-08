@@ -149,9 +149,9 @@ async fn launch_game_command_spawns_via_the_real_ipc_boundary_and_reports_status
     // catalog-lookup -> build-command -> spawn -> status pipeline via a real ENOENT rather than a
     // successful exit, since the system catalog is no longer DB-seeded and so can't be pointed at
     // a stand-in binary like "true" the way it could when systems were rows.
-    let rom = relay_lib::db::roms::create(
+    let rom = relay_core::db::roms::create(
         &pool,
-        relay_lib::db::roms::NewRom {
+        relay_core::db::roms::NewRom {
             system_id: "gamecube".into(),
             path: "gamecube/game.iso".into(),
             crc32: None,
@@ -162,7 +162,7 @@ async fn launch_game_command_spawns_via_the_real_ipc_boundary_and_reports_status
     .await
     .unwrap();
     let game =
-        relay_lib::db::games::create(&pool, relay_lib::db::games::NewGame { rom_id: rom.id, title: "A Game".into() }).await.unwrap();
+        relay_core::db::games::create(&pool, relay_core::db::games::NewGame { rom_id: rom.id, title: "A Game".into() }).await.unwrap();
 
     let app = mock_builder()
         .invoke_handler(tauri::generate_handler![
@@ -415,17 +415,17 @@ async fn profile_commands_round_trip_through_ipc() {
 async fn game_media_commands_are_reachable_through_ipc() {
     let (pool, _dir) = throwaway_pool().await;
 
-    let rom = relay_lib::db::roms::create(
+    let rom = relay_core::db::roms::create(
         &pool,
-        relay_lib::db::roms::NewRom { system_id: "nes".into(), path: "nes/game.nes".into(), crc32: None, size_bytes: None, discs: None },
+        relay_core::db::roms::NewRom { system_id: "nes".into(), path: "nes/game.nes".into(), crc32: None, size_bytes: None, discs: None },
     )
     .await
     .unwrap();
     let game =
-        relay_lib::db::games::create(&pool, relay_lib::db::games::NewGame { rom_id: rom.id, title: "A Game".into() }).await.unwrap();
-    relay_lib::db::game_media::create(
+        relay_core::db::games::create(&pool, relay_core::db::games::NewGame { rom_id: rom.id, title: "A Game".into() }).await.unwrap();
+    relay_core::db::game_media::create(
         &pool,
-        relay_lib::db::game_media::NewGameMedia {
+        relay_core::db::game_media::NewGameMedia {
             game_id: game.id.clone(),
             kind: "boxart".into(),
             local_path: "nes/game-1/boxart.png".into(),

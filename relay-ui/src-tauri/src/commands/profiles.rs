@@ -1,17 +1,16 @@
 use std::path::PathBuf;
 
+use relay_core::db::profiles::{self, ProfileSummary};
+use relay_core::db::ra_stats::{self, NewRaStats};
+use relay_core::retroachievements::client::{RaRecentUnlock, RaUserStats, RetroAchievementsClient};
+use relay_core::retroachievements::connect_client;
 use serde::Serialize;
 use sqlx::SqlitePool;
 use tauri::{AppHandle, Manager, State};
 
-use crate::db::profiles::{self, ProfileSummary};
-use crate::db::ra_stats::{self, NewRaStats};
-use crate::retroachievements::client::{RaRecentUnlock, RaUserStats, RetroAchievementsClient};
-use crate::retroachievements::connect_client;
-
 // Credential encryption key lives in the app data dir, alongside (but separate from) the SQLite
-// DB itself -- see secrets.rs's own module doc for why a DB copy/backup shouldn't be enough to
-// recover a linked account's credentials on its own.
+// DB itself -- see relay_core::secrets's own module doc for why a DB copy/backup shouldn't be
+// enough to recover a linked account's credentials on its own.
 fn secrets_key_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(app.path().app_data_dir().map_err(crate::logging::err_to_string)?.join("secret.key"))
 }

@@ -1,9 +1,8 @@
+use relay_core::db::game_media::{self, GameMedia};
+use relay_core::game_media_files;
+use relay_core::library;
 use sqlx::SqlitePool;
 use tauri::State;
-
-use crate::db::game_media::{self, GameMedia};
-use crate::game_media_files;
-use crate::ingestion::paths;
 
 #[tauri::command]
 pub async fn list_game_media(pool: State<'_, SqlitePool>, game_id: String) -> Result<Vec<GameMedia>, String> {
@@ -16,14 +15,14 @@ pub async fn list_game_media(pool: State<'_, SqlitePool>, game_id: String) -> Re
 /// `get_media_root_path`'s own doc comment).
 #[tauri::command]
 pub async fn list_game_media_files(pool: State<'_, SqlitePool>, game_id: String) -> Result<Vec<String>, String> {
-    game_media_files::list_media_files(pool.inner(), &paths::media_path(), &game_id).await.map_err(crate::logging::err_to_string)
+    game_media_files::list_media_files(pool.inner(), &library::media_path(), &game_id).await.map_err(crate::logging::err_to_string)
 }
 
 /// Makes an already-present file in the game's media folder the active box art -- no download, no
 /// network call (see `game_media_files::select_boxart_file`).
 #[tauri::command]
 pub async fn select_boxart_file(pool: State<'_, SqlitePool>, game_id: String, filename: String) -> Result<(), String> {
-    game_media_files::select_boxart_file(pool.inner(), &paths::media_path(), &game_id, &filename)
+    game_media_files::select_boxart_file(pool.inner(), &library::media_path(), &game_id, &filename)
         .await
         .map_err(crate::logging::err_to_string)
 }
@@ -34,5 +33,5 @@ pub async fn select_boxart_file(pool: State<'_, SqlitePool>, game_id: String, fi
 /// decision, not something this command makes for it).
 #[tauri::command]
 pub fn get_media_root_path() -> String {
-    paths::media_path().to_string_lossy().into_owned()
+    library::media_path().to_string_lossy().into_owned()
 }

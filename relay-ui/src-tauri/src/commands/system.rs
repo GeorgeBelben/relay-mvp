@@ -1,6 +1,6 @@
 use tauri::{AppHandle, Manager};
 
-use crate::system::provider::{ActiveSystemProvider, SystemProvider};
+use relay_core::system::provider::{ActiveSystemProvider, SystemProvider};
 
 /// There's no profile/auth system for OS-level login -- the real Linux account name is a more
 /// honest placeholder for "currently logged in user" than a fake one, and it's free. Reads $USER

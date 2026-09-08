@@ -1,13 +1,12 @@
 use std::path::PathBuf;
 
+use relay_core::db::{profiles, settings};
+use relay_core::game_actions::{self, GameAchievementsProgress, ReidentifyCandidate};
+use relay_core::ingestion::identify::steamgriddb::SteamGridDbClient;
+use relay_core::library;
+use relay_core::retroachievements::client::RetroAchievementsClient;
 use sqlx::SqlitePool;
 use tauri::{AppHandle, Manager, State};
-
-use crate::db::{profiles, settings};
-use crate::game_actions::{self, GameAchievementsProgress, ReidentifyCandidate};
-use crate::ingestion::identify::steamgriddb::SteamGridDbClient;
-use crate::ingestion::paths;
-use crate::retroachievements::client::RetroAchievementsClient;
 
 async fn require_steamgriddb_client(pool: &SqlitePool) -> Result<SteamGridDbClient, String> {
     let api_key = settings::get(pool, "steamgriddbApiKey").await.map_err(crate::logging::err_to_string)?;
@@ -47,7 +46,7 @@ pub async fn search_for_reidentify(pool: State<'_, SqlitePool>, query: String) -
 pub async fn apply_reidentify(pool: State<'_, SqlitePool>, game_id: String, steamgriddb_id: i64, title: String) -> Result<(), String> {
     let client = require_steamgriddb_client(pool.inner()).await?;
     let http = reqwest::Client::new();
-    game_actions::apply_reidentify(&client, &http, pool.inner(), &paths::media_path(), &game_id, steamgriddb_id, &title)
+    game_actions::apply_reidentify(&client, &http, pool.inner(), &library::media_path(), &game_id, steamgriddb_id, &title)
         .await
         .map_err(crate::logging::err_to_string)
 }

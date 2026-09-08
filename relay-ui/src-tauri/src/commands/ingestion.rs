@@ -1,15 +1,10 @@
-use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
+use relay_core::ingestion::pipeline::{self, ScanStatus};
+use relay_core::library;
 use sqlx::SqlitePool;
 use tauri::{AppHandle, Emitter, Manager, State};
-
-use crate::db::settings;
-use crate::ingestion::identify::no_intro::NoIntroDatLookup;
-use crate::ingestion::identify::steamgriddb::SteamGridDbClient;
-use crate::ingestion::paths;
-use crate::ingestion::pipeline::{self, ScanStatus};
 
 /// Guards against overlapping "Rescan Library" runs -- managed as Tauri state so it lives for
 /// the app's lifetime, shared across every `rescan_library` invocation.
@@ -36,6 +31,10 @@ pub fn get_scan_status(status: State<'_, ScanStatusState>) -> ScanStatus {
     status.0.lock().unwrap().clone()
 }
 
+/// Thin Tauri wrapper: resolves the Tauri-specific DATs cache location and forwards status events
+/// onto the frontend (and into `ScanStatusState`, for a listener that attaches after a fast scan
+/// already finished), delegating the actual settings-resolution + scan/probe/identify/enrich work
+/// to `relay_core::ingestion::pipeline::rescan_from_settings`.
 #[tauri::command]
 pub async fn rescan_library(
     app: AppHandle,
@@ -46,85 +45,12 @@ pub async fn rescan_library(
     // Mirrors the Electron MVP's <userData>/dats/ cache location.
     let dats_cache_dir = app.path().app_data_dir().map_err(crate::logging::err_to_string)?.join("dats");
 
-    rescan_library_at(
-        &app,
-        pool.inner(),
-        &guard.0,
-        &status.0,
-        &paths::roms_path(),
-        &paths::media_path(),
-        &dats_cache_dir,
-    )
-    .await
-}
-
-/// The actual guts of `rescan_library`, with the library roots taken as parameters rather than
-/// resolved internally -- the public command always passes the real `~/Relay` paths, but this is
-/// what lets a test exercise the AppHandle-emit + status-state wiring against a tempdir instead
-/// of risking a scan of whatever happens to be at the real path on the machine running it.
-#[allow(clippy::too_many_arguments)]
-async fn rescan_library_at<R: tauri::Runtime>(
-    app: &AppHandle<R>,
-    pool: &SqlitePool,
-    running: &Arc<AtomicBool>,
-    status: &Mutex<ScanStatus>,
-    roms_root: &Path,
-    media_root: &Path,
-    dats_cache_dir: &Path,
-) -> Result<(), String> {
-    let api_key = settings::get(pool, "steamgriddbApiKey").await.map_err(crate::logging::err_to_string)?;
-    let client = api_key.map(SteamGridDbClient::new);
-    let no_intro = NoIntroDatLookup::new(dats_cache_dir.to_path_buf());
-
-    pipeline::rescan(pool, roms_root, media_root, &no_intro, client.as_ref(), running, |next| {
-        if let Ok(mut guard) = status.lock() {
+    pipeline::rescan_from_settings(pool.inner(), &library::roms_path(), &library::media_path(), &dats_cache_dir, &guard.0, |next| {
+        if let Ok(mut guard) = status.0.lock() {
             *guard = next.clone();
         }
         let _ = app.emit("scanner:status", &next);
     })
     .await
     .map_err(crate::logging::err_to_string)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use tauri::test::{mock_builder, mock_context, noop_assets};
-    use tauri::WebviewWindowBuilder;
-
-    #[tokio::test]
-    async fn rescan_library_at_updates_status_state_and_emits_events() {
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("test.db");
-        let options = sqlx::sqlite::SqliteConnectOptions::new().filename(&db_path).create_if_missing(true);
-        let pool = sqlx::sqlite::SqlitePoolOptions::new().connect_with(options).await.unwrap();
-        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
-
-        let app = mock_builder().build(mock_context(noop_assets())).expect("failed to build mock app");
-        let _webview = WebviewWindowBuilder::new(&app, "main", Default::default()).build().unwrap();
-        let app_handle = app.handle().clone();
-
-        let running = Arc::new(AtomicBool::new(false));
-        let status = Mutex::new(ScanStatus::Idle);
-        let roms_root = tempfile::tempdir().unwrap();
-        let media_root = tempfile::tempdir().unwrap();
-        let dats_cache_dir = tempfile::tempdir().unwrap();
-
-        rescan_library_at(
-            &app_handle,
-            &pool,
-            &running,
-            &status,
-            roms_root.path(),
-            media_root.path(),
-            dats_cache_dir.path(),
-        )
-        .await
-        .unwrap();
-
-        // No systems seeded, so scan finds nothing and enrichment never starts (no api key
-        // configured either) -- what matters here is that the state wiring itself works.
-        assert_eq!(*status.lock().unwrap(), ScanStatus::Done);
-        assert!(!running.load(std::sync::atomic::Ordering::SeqCst));
-    }
 }

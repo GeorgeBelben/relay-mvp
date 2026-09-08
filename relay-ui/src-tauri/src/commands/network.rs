@@ -1,5 +1,5 @@
-use crate::system::network::{WifiConnectError, WifiNetwork};
-use crate::system::provider::{ActiveSystemProvider, SystemProvider};
+use relay_core::system::network::{WifiConnectError, WifiNetwork};
+use relay_core::system::provider::{ActiveSystemProvider, SystemProvider};
 
 #[tauri::command]
 pub async fn list_wifi_networks() -> Result<Vec<WifiNetwork>, String> {

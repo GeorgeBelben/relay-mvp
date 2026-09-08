@@ -1,7 +1,6 @@
+use relay_core::db::library::{self, LibraryGame, LibraryShelf};
 use sqlx::SqlitePool;
 use tauri::State;
-
-use crate::db::library::{self, LibraryGame, LibraryShelf};
 
 #[tauri::command]
 pub async fn list_library_shelves(pool: State<'_, SqlitePool>) -> Result<Vec<LibraryShelf>, String> {

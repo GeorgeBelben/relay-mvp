@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::systems::{self, SystemDef};
+use relay_core::systems::{self, SystemDef};
 
 /// Wire type mirroring `systems::SystemDef` -- Tauri's IPC needs an owned, `Serialize` value, not
 /// the `'static` borrowed catalog entries themselves.

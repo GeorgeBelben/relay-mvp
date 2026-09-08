@@ -16,7 +16,8 @@ pub async fn throwaway_pool() -> (SqlitePool, tempfile::TempDir) {
         .await
         .expect("failed to connect to throwaway sqlite file");
 
-    sqlx::migrate!("./migrations")
+    // Schema now lives in relay-core, which this crate no longer duplicates.
+    sqlx::migrate!("../../relay-core/migrations")
         .run(&pool)
         .await
         .expect("failed to run migrations");
