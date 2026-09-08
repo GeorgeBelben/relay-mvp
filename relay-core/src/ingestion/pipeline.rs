@@ -7,7 +7,7 @@ use sqlx::SqlitePool;
 use thiserror::Error;
 
 use crate::db::{games, roms};
-use crate::library::to_forward_slash;
+use crate::library::{self, to_forward_slash};
 use crate::scan::{self, ScanTarget};
 use crate::systems;
 use crate::title::title_from_filename;
@@ -37,6 +37,17 @@ pub enum PipelineError {
     Db(#[from] sqlx::Error),
 }
 
+/// What a scan actually did, for a caller to report once it's done -- separate from `ScanStatus`
+/// (which mirrors the Electron MVP's frontend event contract and shouldn't grow new fields for
+/// this). `loose` lists ROMs found sitting directly in `roms/<system_id>/` rather than in a
+/// folder of their own -- these are skipped entirely (see `scan_and_probe`), so this is the only
+/// place a caller learns about them at all.
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct ScanSummary {
+    pub found: usize,
+    pub loose: Vec<String>,
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn upsert_rom_and_game(
     pool: &SqlitePool,
@@ -63,17 +74,19 @@ async fn upsert_rom_and_game(
 /// finds, identifies it against RetroAchievements' hash list (exact MD5 match -- this is what
 /// actually links a game and its achievements, not SteamGridDB) and No-Intro's DAT (CRC32 title
 /// correction only), and upserts roms/games. Anything not found this pass is marked missing, not
-/// deleted. `ra_hashes` is `None` when no RetroAchievements API key is configured, which skips
-/// identification entirely (matching how SteamGridDB enrichment is already skipped when unset).
-/// Ported from the Electron MVP's `scanLibrary.ts` (its dev-seed branch is deliberately not
-/// ported -- that's a dev-only convenience, not a pipeline concern).
+/// deleted -- including loose ROMs deliberately skipped this pass (see the loop body). `ra_hashes`
+/// is `None` when no RetroAchievements API key is configured, which skips identification entirely
+/// (matching how SteamGridDB enrichment is already skipped when unset). Ported from the Electron
+/// MVP's `scanLibrary.ts` (its dev-seed branch is deliberately not ported -- that's a dev-only
+/// convenience, not a pipeline concern).
 pub async fn scan_and_probe(
     pool: &SqlitePool,
     roms_root: &Path,
     no_intro: &NoIntroDatLookup,
     ra_hashes: Option<&RaHashLookup>,
-) -> Result<usize, sqlx::Error> {
+) -> Result<ScanSummary, sqlx::Error> {
     let mut found_paths = Vec::new();
+    let mut loose = Vec::new();
 
     for system in systems::ALL {
         let system_folder = roms_root.join(system.id);
@@ -83,6 +96,16 @@ pub async fn scan_and_probe(
             match target {
                 ScanTarget::Single { file_path, title } => {
                     let relative = to_forward_slash(file_path.strip_prefix(roms_root).unwrap_or(&file_path));
+
+                    // Loose files (sitting directly in roms/<system>/, not in a folder of their
+                    // own) are deliberately skipped -- there's nowhere to colocate art next to
+                    // them without picking a folder for the user. Not pushing to found_paths
+                    // means an already-tracked loose rom gets marked missing by mark_missing
+                    // below, same as if it had actually disappeared -- no special-casing needed.
+                    if library::is_loose(roms_root, system.id, &relative) {
+                        loose.push(relative);
+                        continue;
+                    }
                     found_paths.push(relative.clone());
 
                     let (crc32, md5, size_bytes) = match probe::probe_file(&file_path).await {
@@ -144,7 +167,7 @@ pub async fn scan_and_probe(
     }
 
     roms::mark_missing(pool, &found_paths).await?;
-    Ok(found_paths.len())
+    Ok(ScanSummary { found: found_paths.len(), loose })
 }
 
 /// The full "Rescan Library" operation: scan+probe+identify, then fetch art for anything
@@ -168,9 +191,9 @@ pub async fn rescan(
     steamgriddb: Option<&SteamGridDbClient>,
     running: &AtomicBool,
     mut on_status: impl FnMut(ScanStatus),
-) -> Result<(), PipelineError> {
+) -> Result<ScanSummary, PipelineError> {
     if running.swap(true, Ordering::SeqCst) {
-        return Ok(());
+        return Ok(ScanSummary::default());
     }
     let result = run_rescan(pool, roms_root, no_intro, ra_hashes, steamgriddb, &mut on_status).await;
     running.store(false, Ordering::SeqCst);
@@ -189,9 +212,9 @@ async fn run_rescan(
     ra_hashes: Option<&RaHashLookup>,
     steamgriddb: Option<&SteamGridDbClient>,
     on_status: &mut impl FnMut(ScanStatus),
-) -> Result<(), PipelineError> {
+) -> Result<ScanSummary, PipelineError> {
     on_status(ScanStatus::ScanningFiles);
-    scan_and_probe(pool, roms_root, no_intro, ra_hashes).await?;
+    let summary = scan_and_probe(pool, roms_root, no_intro, ra_hashes).await?;
 
     if let Some(client) = steamgriddb {
         let http = reqwest::Client::new();
@@ -209,7 +232,7 @@ async fn run_rescan(
     }
 
     on_status(ScanStatus::Done);
-    Ok(())
+    Ok(summary)
 }
 
 /// Convenience wrapper around `rescan` that resolves its optional collaborators (a SteamGridDB
@@ -226,7 +249,7 @@ pub async fn rescan_from_settings(
     ra_cache_dir: &Path,
     running: &AtomicBool,
     on_status: impl FnMut(ScanStatus),
-) -> Result<(), PipelineError> {
+) -> Result<ScanSummary, PipelineError> {
     let steamgriddb_key = crate::db::settings::get(pool, "steamgriddbApiKey").await?;
     let client = steamgriddb_key.map(SteamGridDbClient::new);
     let no_intro = NoIntroDatLookup::new(dats_cache_dir.to_path_buf());
@@ -266,13 +289,16 @@ mod tests {
         let (pool, _db_dir) = throwaway_pool().await;
 
         let roms_root = tempfile::tempdir().unwrap();
-        let snes_dir = roms_root.path().join("snes");
-        fs::create_dir(&snes_dir).unwrap();
-        fs::write(snes_dir.join("Chrono Trigger (USA).sfc"), b"fake-rom-bytes").unwrap();
+        // Foldered, not loose -- a loose rom is deliberately skipped (see the dedicated test
+        // below), so this test uses the "properly organized" shape to test the happy path.
+        let game_dir = roms_root.path().join("snes").join("Chrono Trigger (USA)");
+        fs::create_dir_all(&game_dir).unwrap();
+        fs::write(game_dir.join("Chrono Trigger (USA).sfc"), b"fake-rom-bytes").unwrap();
         let no_intro = no_intro_stub();
 
-        let found = scan_and_probe(&pool, roms_root.path(), &no_intro, None).await.unwrap();
-        assert_eq!(found, 1);
+        let summary = scan_and_probe(&pool, roms_root.path(), &no_intro, None).await.unwrap();
+        assert_eq!(summary.found, 1);
+        assert!(summary.loose.is_empty());
 
         let all_roms = roms::list(&pool).await.unwrap();
         assert_eq!(all_roms.len(), 1);
@@ -286,10 +312,39 @@ mod tests {
         assert!(all_games[0].retroachievements_game_id.is_none()); // no RA lookup configured
 
         // Rescanning after the file's gone marks the rom missing rather than deleting it.
-        fs::remove_file(snes_dir.join("Chrono Trigger (USA).sfc")).unwrap();
-        let found_again = scan_and_probe(&pool, roms_root.path(), &no_intro, None).await.unwrap();
-        assert_eq!(found_again, 0);
+        fs::remove_file(game_dir.join("Chrono Trigger (USA).sfc")).unwrap();
+        let summary_again = scan_and_probe(&pool, roms_root.path(), &no_intro, None).await.unwrap();
+        assert_eq!(summary_again.found, 0);
 
+        let all_roms = roms::list(&pool).await.unwrap();
+        assert_eq!(all_roms[0].status, "missing");
+    }
+
+    #[tokio::test]
+    async fn scan_and_probe_skips_a_loose_rom_and_marks_it_missing_if_previously_tracked() {
+        let (pool, _db_dir) = throwaway_pool().await;
+
+        let roms_root = tempfile::tempdir().unwrap();
+        let snes_dir = roms_root.path().join("snes");
+        fs::create_dir(&snes_dir).unwrap();
+        fs::write(snes_dir.join("Loose Game.sfc"), b"fake-rom-bytes").unwrap();
+        let no_intro = no_intro_stub();
+
+        let summary = scan_and_probe(&pool, roms_root.path(), &no_intro, None).await.unwrap();
+        assert_eq!(summary.found, 0);
+        assert_eq!(summary.loose, vec!["snes/Loose Game.sfc".to_string()]);
+        assert!(roms::list(&pool).await.unwrap().is_empty());
+
+        // Simulate the rom having been tracked before this behavior existed (e.g. an upgrade) --
+        // a subsequent scan should mark it missing, not silently leave a stale "ok" row.
+        roms::upsert(
+            &pool,
+            roms::NewRom { system_id: "snes".into(), path: "snes/Loose Game.sfc".into(), crc32: None, md5: None, size_bytes: None, discs: None },
+        )
+        .await
+        .unwrap();
+
+        scan_and_probe(&pool, roms_root.path(), &no_intro, None).await.unwrap();
         let all_roms = roms::list(&pool).await.unwrap();
         assert_eq!(all_roms[0].status, "missing");
     }
@@ -299,8 +354,10 @@ mod tests {
         let (pool, _db_dir) = throwaway_pool().await;
 
         let roms_root = tempfile::tempdir().unwrap();
-        fs::create_dir(roms_root.path().join("nes")).unwrap();
-        fs::write(roms_root.path().join("nes/game.nes"), b"fake-rom-bytes").unwrap();
+        // Foldered, not loose -- a loose rom is skipped entirely before identification ever runs.
+        let game_dir = roms_root.path().join("nes").join("Game");
+        fs::create_dir_all(&game_dir).unwrap();
+        fs::write(game_dir.join("game.nes"), b"fake-rom-bytes").unwrap();
         let no_intro = no_intro_stub();
 
         let server = MockServer::start().await;
@@ -313,7 +370,7 @@ mod tests {
             .await;
         // MD5 of b"fake-rom-bytes", computed once via a throwaway probe rather than hand-copied,
         // so this test can't silently drift if probe_file's hashing ever changed.
-        let expected_md5 = super::super::probe::probe_file(&roms_root.path().join("nes/game.nes")).await.unwrap().md5;
+        let expected_md5 = super::super::probe::probe_file(&game_dir.join("game.nes")).await.unwrap().md5;
         Mock::given(method("GET"))
             .and(wiremock::matchers::query_param("i", "7"))
             .and(wiremock::matchers::query_param("h", "1"))
@@ -338,8 +395,9 @@ mod tests {
         let (pool, _db_dir) = throwaway_pool().await;
 
         let roms_root = tempfile::tempdir().unwrap();
-        fs::create_dir(roms_root.path().join("snes")).unwrap();
-        fs::write(roms_root.path().join("snes/game.sfc"), b"data").unwrap();
+        let game_dir = roms_root.path().join("snes").join("Game");
+        fs::create_dir_all(&game_dir).unwrap();
+        fs::write(game_dir.join("game.sfc"), b"data").unwrap();
 
         let no_intro = no_intro_stub();
         let mut statuses = Vec::new();
@@ -357,8 +415,9 @@ mod tests {
         let (pool, _db_dir) = throwaway_pool().await;
 
         let roms_root = tempfile::tempdir().unwrap();
-        fs::create_dir(roms_root.path().join("snes")).unwrap();
-        fs::write(roms_root.path().join("snes/Chrono Trigger.sfc"), b"data").unwrap();
+        let game_dir = roms_root.path().join("snes").join("Chrono Trigger");
+        fs::create_dir_all(&game_dir).unwrap();
+        fs::write(game_dir.join("Chrono Trigger.sfc"), b"data").unwrap();
 
         let server = MockServer::start().await;
         Mock::given(method("GET"))
@@ -397,11 +456,11 @@ mod tests {
         let game = &games::list(&pool).await.unwrap()[0];
         assert_eq!(game.steamgriddb_id, Some(7));
 
-        // Colocated: the boxart lands as a sibling of the loose rom file, not in a separate
-        // media/ tree, prefixed with the rom's own stem.
+        // Colocated: the boxart lands inside the game's own folder, not in a separate media/
+        // tree. No stem-prefix needed here since it's already foldered (not loose).
         let media = game_media::list_for_game(&pool, &game.id).await.unwrap();
         assert_eq!(media.len(), 1);
-        assert!(media[0].local_path.starts_with("snes/Chrono Trigger."));
+        assert!(media[0].local_path.starts_with("snes/Chrono Trigger/boxart-"));
         assert!(roms_root.path().join(&media[0].local_path).exists());
     }
 
@@ -410,8 +469,9 @@ mod tests {
         let (pool, _db_dir) = throwaway_pool().await;
 
         let roms_root = tempfile::tempdir().unwrap();
-        fs::create_dir(roms_root.path().join("snes")).unwrap();
-        fs::write(roms_root.path().join("snes/game.sfc"), b"data").unwrap();
+        let game_dir = roms_root.path().join("snes").join("Game");
+        fs::create_dir_all(&game_dir).unwrap();
+        fs::write(game_dir.join("game.sfc"), b"data").unwrap();
 
         let no_intro = no_intro_stub();
         let running = AtomicBool::new(true); // simulate an in-flight run
@@ -427,8 +487,9 @@ mod tests {
         let (pool, _db_dir) = throwaway_pool().await;
 
         let roms_root = tempfile::tempdir().unwrap();
-        fs::create_dir(roms_root.path().join("snes")).unwrap();
-        fs::write(roms_root.path().join("snes/game.sfc"), b"data").unwrap();
+        let game_dir = roms_root.path().join("snes").join("Game");
+        fs::create_dir_all(&game_dir).unwrap();
+        fs::write(game_dir.join("game.sfc"), b"data").unwrap();
         let dats_cache_dir = tempfile::tempdir().unwrap();
         let ra_cache_dir = tempfile::tempdir().unwrap();
 

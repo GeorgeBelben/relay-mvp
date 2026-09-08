@@ -43,14 +43,17 @@ pub async fn rescan_library(
     status: State<'_, ScanStatusState>,
 ) -> Result<(), String> {
     // Mirrors the Electron MVP's <userData>/dats/ cache location.
-    let dats_cache_dir = app.path().app_data_dir().map_err(crate::logging::err_to_string)?.join("dats");
+    let app_data_dir = app.path().app_data_dir().map_err(crate::logging::err_to_string)?;
+    let dats_cache_dir = app_data_dir.join("dats");
+    let ra_cache_dir = app_data_dir.join("ra-hashes");
 
-    pipeline::rescan_from_settings(pool.inner(), &library::roms_path(), &library::media_path(), &dats_cache_dir, &guard.0, |next| {
+    pipeline::rescan_from_settings(pool.inner(), &library::roms_path(), &dats_cache_dir, &ra_cache_dir, &guard.0, |next| {
         if let Ok(mut guard) = status.0.lock() {
             *guard = next.clone();
         }
         let _ = app.emit("scanner:status", &next);
     })
     .await
+    .map(|_summary| ())
     .map_err(crate::logging::err_to_string)
 }

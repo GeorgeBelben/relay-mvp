@@ -132,26 +132,18 @@ async fn scan(report: &relay_core::init::Report) -> Result<(), String> {
         ScanStatus::Idle | ScanStatus::Done | ScanStatus::Error { .. } => {}
     };
     let result = relay_core::ingestion::pipeline::rescan_from_settings(&report.pool, &roms_root, &dats_cache_dir, &ra_cache_dir, &running, on_status).await;
-
-    if let Err(err) = result {
-        spinner.finish_and_clear();
-        return Err(format!("scan failed: {err}"));
-    }
-
     spinner.finish_and_clear();
 
-    let found = relay_core::db::games::list(&report.pool).await.map_err(|err| format!("scan finished but couldn't count games: {err}"))?.len();
-    println!("Found {found} rom(s)");
+    let summary = result.map_err(|err| format!("scan failed: {err}"))?;
+    println!("Found {} rom(s)", summary.found);
 
-    // Loose ROMs (sitting directly in roms/<system>/, not in a folder of their own) can't have a
-    // manual/extra art colocated with them the way a foldered one can -- flagged so you know
-    // which ones you'd need to move yourself if you want that.
-    let roms = relay_core::db::roms::list(&report.pool).await.map_err(|err| format!("couldn't check for loose roms: {err}"))?;
-    let loose: Vec<_> = roms.iter().filter(|rom| relay_core::library::is_loose(&roms_root, &rom.system_id, &rom.path)).collect();
-    if !loose.is_empty() {
-        println!("{} rom(s) not in their own folder:", loose.len());
-        for rom in loose {
-            println!("  {}", rom.path);
+    // Loose ROMs (sitting directly in roms/<system>/, not in a folder of their own) are skipped
+    // entirely -- there's nowhere to colocate art next to them without picking a folder for the
+    // user -- so this is the only place you'd learn about one at all.
+    if !summary.loose.is_empty() {
+        println!("{} rom(s) ignored (not in their own folder):", summary.loose.len());
+        for path in &summary.loose {
+            println!("  {path}");
         }
     }
 
