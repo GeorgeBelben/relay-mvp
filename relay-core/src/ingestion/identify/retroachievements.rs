@@ -53,6 +53,17 @@ impl RaHashLookup {
         }
     }
 
+    /// Exposed so tests can point the client at a local mock server instead of the real API.
+    pub fn with_base_url(api_key: impl Into<String>, cache_dir: PathBuf, base_url: &str) -> Self {
+        Self {
+            client: RetroAchievementsClient::with_base_url(api_key, base_url),
+            cache_dir,
+            consoles: Mutex::new(None),
+            resolved: Mutex::new(HashMap::new()),
+            hashes: Mutex::new(HashMap::new()),
+        }
+    }
+
     /// `None` means "couldn't identify" (no RA console match for this system, an API error, or
     /// this exact dump isn't in RA's hash set) -- callers keep whatever title they already had
     /// either way, same shape as `no_intro::lookup`.

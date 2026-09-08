@@ -77,12 +77,13 @@ impl SteamGridDbClient {
         self.request(url).await
     }
 
-    /// Portrait "grid" art (600x900) is the closest thing SteamGridDB has to traditional box art
-    /// -- picks the first result at that dimension, or `None` if nobody's uploaded one.
+    /// A square grid (512x512 or 1024x1024 -- SteamGridDB's own documented square sizes,
+    /// distinct from the 600x900 portrait/poster grids) for a game tile, not a scan of the
+    /// physical box -- picks the first result at either size, or `None` if nobody's uploaded one.
     pub async fn get_boxart_url(&self, game_id: i64) -> Result<Option<String>, SteamGridDbError> {
         let mut url = self.base_url.clone();
         url.path_segments_mut().unwrap().extend(["grids", "game", &game_id.to_string()]);
-        url.query_pairs_mut().append_pair("dimensions", "600x900");
+        url.query_pairs_mut().append_pair("dimensions", "512x512,1024x1024");
 
         let grids: Vec<SteamGridDbImage> = self.request(url).await?;
         Ok(grids.into_iter().next().map(|g| g.url))

@@ -118,20 +118,20 @@ async fn scan(report: &relay_core::init::Report) -> Result<(), String> {
     use relay_core::ingestion::pipeline::ScanStatus;
 
     let roms_root = relay_core::library::roms_path();
-    let media_root = relay_core::library::media_path();
     let dats_cache_dir = report.data_dir.join("dats");
+    let ra_cache_dir = report.data_dir.join("ra-hashes");
     let running = AtomicBool::new(false);
 
     let spinner = indicatif::ProgressBar::new_spinner();
     spinner.enable_steady_tick(std::time::Duration::from_millis(100));
     spinner.set_message("Scanning library...");
 
-    let result = relay_core::ingestion::pipeline::rescan_from_settings(&report.pool, &roms_root, &media_root, &dats_cache_dir, &running, |status| match status {
+    let on_status = |status| match status {
         ScanStatus::ScanningFiles => spinner.set_message("Scanning library..."),
         ScanStatus::EnrichingArt { current, total } => spinner.set_message(format!("Downloading artwork... {current}/{total}")),
         ScanStatus::Idle | ScanStatus::Done | ScanStatus::Error { .. } => {}
-    })
-    .await;
+    };
+    let result = relay_core::ingestion::pipeline::rescan_from_settings(&report.pool, &roms_root, &dats_cache_dir, &ra_cache_dir, &running, on_status).await;
 
     if let Err(err) = result {
         spinner.finish_and_clear();
@@ -142,6 +142,19 @@ async fn scan(report: &relay_core::init::Report) -> Result<(), String> {
 
     let found = relay_core::db::games::list(&report.pool).await.map_err(|err| format!("scan finished but couldn't count games: {err}"))?.len();
     println!("Found {found} rom(s)");
+
+    // Loose ROMs (sitting directly in roms/<system>/, not in a folder of their own) can't have a
+    // manual/extra art colocated with them the way a foldered one can -- flagged so you know
+    // which ones you'd need to move yourself if you want that.
+    let roms = relay_core::db::roms::list(&report.pool).await.map_err(|err| format!("couldn't check for loose roms: {err}"))?;
+    let loose: Vec<_> = roms.iter().filter(|rom| relay_core::library::is_loose(&roms_root, &rom.system_id, &rom.path)).collect();
+    if !loose.is_empty() {
+        println!("{} rom(s) not in their own folder:", loose.len());
+        for rom in loose {
+            println!("  {}", rom.path);
+        }
+    }
+
     Ok(())
 }
 
@@ -150,8 +163,11 @@ async fn games(report: &relay_core::init::Report) -> Result<(), String> {
 
     println!("{} game(s):", games.len());
     for game in &games {
-        let enriched = if game.enriched_at.is_some() { "" } else { " (not yet identified)" };
-        println!("  {} [{}]{}", game.title, game.id, enriched);
+        // RetroAchievements is what actually identifies a game (exact hash match); SteamGridDB
+        // only ever fetches optional box art, independent of identification.
+        let identified = if game.retroachievements_game_id.is_some() { "" } else { " (not yet identified)" };
+        let art = if game.steamgriddb_id.is_some() { " [art]" } else { "" };
+        println!("  {} [{}]{}{}", game.title, game.id, identified, art);
     }
 
     Ok(())

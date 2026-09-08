@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "UPDATE roms SET system_id = ?, path = ?, crc32 = ?, size_bytes = ?, discs = ?, updated_at = ?\n           WHERE id = ?\n           RETURNING id, system_id, path, crc32, size_bytes, discs, status,\n                     created_at as \"created_at!: i64\", updated_at as \"updated_at!: i64\"",
+  "query": "UPDATE roms SET system_id = ?, path = ?, crc32 = ?, md5 = ?, size_bytes = ?, discs = ?, updated_at = ?\n           WHERE id = ?\n           RETURNING id, system_id, path, crc32, md5, size_bytes, discs, status,\n                     created_at as \"created_at!: i64\", updated_at as \"updated_at!: i64\"",
   "describe": {
     "columns": [
       {
@@ -48,8 +48,19 @@
         }
       },
       {
-        "name": "size_bytes",
+        "name": "md5",
         "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "roms",
+            "name": "md5"
+          }
+        }
+      },
+      {
+        "name": "size_bytes",
+        "ordinal": 5,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -60,7 +71,7 @@
       },
       {
         "name": "discs",
-        "ordinal": 5,
+        "ordinal": 6,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -71,7 +82,7 @@
       },
       {
         "name": "status",
-        "ordinal": 6,
+        "ordinal": 7,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -82,7 +93,7 @@
       },
       {
         "name": "created_at!: i64",
-        "ordinal": 7,
+        "ordinal": 8,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -93,7 +104,7 @@
       },
       {
         "name": "updated_at!: i64",
-        "ordinal": 8,
+        "ordinal": 9,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -104,7 +115,7 @@
       }
     ],
     "parameters": {
-      "Right": 7
+      "Right": 8
     },
     "nullable": [
       false,
@@ -113,10 +124,11 @@
       true,
       true,
       true,
+      true,
       false,
       false,
       false
     ]
   },
-  "hash": "9cd7675b6f10e3d052155fc1342691d6f77e0f0e9a01697852ea825a735ad844"
+  "hash": "8d17e7384c139374fbef68d701ee66e99e1fa7af90564e2f0b5c1f9d8dbad4cb"
 }

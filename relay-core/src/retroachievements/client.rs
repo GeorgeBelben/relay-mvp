@@ -13,7 +13,12 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-const DEFAULT_BASE_URL: &str = "https://retroachievements.org/API";
+// Trailing slash matters: Url::join replaces the last path segment when the base has none, so
+// without it "https://retroachievements.org/API".join("API_GetX.php") produces
+// ".../API_GetX.php" (missing the /API/ directory) instead of the real ".../API/API_GetX.php" --
+// verified empirically, not just from the RFC. Every existing test overrides this via
+// with_base_url pointed at a bare mock server root, which is why this never surfaced before.
+const DEFAULT_BASE_URL: &str = "https://retroachievements.org/API/";
 const BADGE_BASE_URL: &str = "https://i.retroachievements.org/Badge";
 
 #[derive(Debug, Error)]

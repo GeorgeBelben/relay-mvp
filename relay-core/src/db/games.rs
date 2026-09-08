@@ -156,15 +156,17 @@ pub struct UnenrichedGame {
     pub id: String,
     pub title: String,
     pub system_id: String,
+    pub rom_path: String,
 }
 
-/// Games an enrichment pass hasn't touched yet, joined with their rom's system (needed to lay
-/// out where a matched game's box art gets downloaded to). Excludes roms whose file has gone
-/// missing since the last scan. Ported from the Electron MVP's `gamesRepository.listUnenriched`.
+/// Games an enrichment pass hasn't touched yet, joined with their rom's system + path (needed to
+/// lay out where a matched game's box art gets downloaded to, colocated with the rom). Excludes
+/// roms whose file has gone missing since the last scan. Ported from the Electron MVP's
+/// `gamesRepository.listUnenriched`.
 pub async fn list_unenriched(pool: &SqlitePool) -> Result<Vec<UnenrichedGame>, sqlx::Error> {
     sqlx::query_as!(
         UnenrichedGame,
-        r#"SELECT games.id, games.title, roms.system_id
+        r#"SELECT games.id, games.title, roms.system_id, roms.path as rom_path
            FROM games
            JOIN roms ON games.rom_id = roms.id
            WHERE roms.status = 'ok' AND games.enriched_at IS NULL"#
@@ -202,6 +204,23 @@ pub async fn mark_matched(
     )
     .fetch_one(pool)
     .await
+}
+
+/// Sets the RA identification, separate from and independent of the SteamGridDB
+/// enriched_at/steamgriddb_id/match_confidence fields above -- RA hash matching identifies a
+/// game (exact, no confidence score needed), SteamGridDB now only ever fetches optional artwork.
+pub async fn mark_ra_matched(pool: &SqlitePool, id: &str, retroachievements_game_id: i64) -> Result<(), sqlx::Error> {
+    let now = now_unix();
+    sqlx::query!(
+        "UPDATE games SET retroachievements_game_id = ?, retroachievements_matched_at = ?, updated_at = ? WHERE id = ?",
+        retroachievements_game_id,
+        now,
+        now,
+        id,
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
 }
 
 // enrichedAt set with steamgriddbId left null means "we tried and SteamGridDB has nothing for

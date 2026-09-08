@@ -17,7 +17,7 @@ const MATCH_THRESHOLD: f64 = 0.82;
 
 #[derive(Debug, PartialEq)]
 pub enum EnrichOutcome {
-    Matched { steamgriddb_id: i64, confidence: f64, boxart_downloaded: bool, backdrop_downloaded: bool },
+    Matched { steamgriddb_id: i64, confidence: f64, boxart_downloaded: bool },
     NoMatch,
 }
 
@@ -33,20 +33,21 @@ pub enum EnrichError {
     Io(#[from] std::io::Error),
 }
 
-/// Identifies and enriches exactly one game: searches SteamGridDB, applies the match threshold,
-/// writes the outcome back to the DB, and -- on a match -- downloads box art and a backdrop under
-/// `media_root/<system_id>/<game_id>/`. Ported from the Electron MVP's
-/// `enrichLibrary.ts#enrichOne` (backdrop downloading is new in this rewrite -- the Electron MVP
-/// only ever fetched box art); the multi-game loop with rate-limiting and progress reporting is a
-/// separate concern layered on top of this. `media_root` is threaded through explicitly (rather
-/// than resolved internally) so tests can point it at a tempdir -- production call sites pass
-/// `library::media_path()`.
+/// Fetches optional box art for exactly one game: searches SteamGridDB, applies the match
+/// threshold, writes the outcome back to the DB, and -- on a match -- downloads a square grid
+/// image colocated with the ROM itself (see `library::art_destination`), not into a separate
+/// media tree. This is purely cosmetic and independent of RetroAchievements identification --
+/// a game can be RA-identified with no box art, have box art with no RA match, both, or neither.
+/// Ported from the Electron MVP's `enrichLibrary.ts#enrichOne`; the multi-game loop with
+/// rate-limiting and progress reporting is a separate concern layered on top of this. `roms_root`
+/// is threaded through explicitly (rather than resolved internally) so tests can point it at a
+/// tempdir -- production call sites pass `library::roms_path()`.
 pub async fn enrich_one(
     client: &SteamGridDbClient,
     http: &reqwest::Client,
     pool: &SqlitePool,
     game: &games::UnenrichedGame,
-    media_root: &Path,
+    roms_root: &Path,
 ) -> Result<EnrichOutcome, EnrichError> {
     let candidates = client.search_games(&game.title).await?;
     let matched = best_match(&game.title, &candidates, |c| c.name.as_str(), MATCH_THRESHOLD)
@@ -63,11 +64,11 @@ pub async fn enrich_one(
 
     games::mark_matched(pool, &game.id, steamgriddb_id, &matched_title, score).await?;
 
-    let dest_dir = library::game_media_dir(media_root, &game.system_id, &game.id);
+    let (dest_dir, filename_prefix) = library::art_destination(roms_root, &game.system_id, &game.rom_path);
 
     let boxart_downloaded = match client.get_boxart_url(steamgriddb_id).await? {
         Some(boxart_url) => {
-            let local_path = download_media_file(http, &boxart_url, &dest_dir, media_root, "boxart").await?;
+            let local_path = download_boxart(http, &boxart_url, roms_root, &dest_dir, &filename_prefix).await?;
             game_media::create(
                 pool,
                 game_media::NewGameMedia {
@@ -83,25 +84,33 @@ pub async fn enrich_one(
         None => false,
     };
 
-    let backdrop_downloaded = match client.get_backdrop_url(steamgriddb_id).await? {
-        Some(backdrop_url) => {
-            let local_path = download_media_file(http, &backdrop_url, &dest_dir, media_root, "backdrop").await?;
-            game_media::create(
-                pool,
-                game_media::NewGameMedia {
-                    game_id: game.id.clone(),
-                    kind: "backdrop".to_string(),
-                    local_path,
-                    source_url: Some(backdrop_url),
-                },
-            )
-            .await?;
-            true
-        }
-        None => false,
-    };
+    Ok(EnrichOutcome::Matched { steamgriddb_id, confidence: score, boxart_downloaded })
+}
 
-    Ok(EnrichOutcome::Matched { steamgriddb_id, confidence: score, boxart_downloaded, backdrop_downloaded })
+/// Downloads `url` into `dest_dir` as `<filename_prefix>boxart-<unix-timestamp><ext>` and returns
+/// the path stored in the database, relative to `roms_root` and forward-slash-normalized. The
+/// timestamped filename matters: a re-download that reused a fixed name would leave an `<img>`'s
+/// `src` unchanged across a swap, and browsers only refetch an image when `src` actually changes.
+/// Deliberately separate from `download_media_file` below (used by `game_actions::apply_reidentify`,
+/// still on the old `media_root`-relative convention) rather than sharing one function with two
+/// different root conventions -- these two can be unified once that caller also moves to
+/// colocated storage.
+async fn download_boxart(http: &reqwest::Client, url: &str, roms_root: &Path, dest_dir: &Path, filename_prefix: &str) -> Result<String, EnrichError> {
+    let res = http.get(url).send().await?.error_for_status()?;
+    let bytes = res.bytes().await?;
+
+    let ext = reqwest::Url::parse(url)
+        .ok()
+        .and_then(|u| Path::new(u.path()).extension().map(|e| e.to_string_lossy().into_owned()))
+        .map(|e| format!(".{e}"))
+        .unwrap_or_else(|| ".png".to_string());
+
+    tokio::fs::create_dir_all(dest_dir).await?;
+    let dest = dest_dir.join(format!("{filename_prefix}boxart-{}{ext}", now_unix()));
+    tokio::fs::write(&dest, &bytes).await?;
+
+    let relative = dest.strip_prefix(roms_root).unwrap_or(&dest);
+    Ok(library::to_forward_slash(relative))
 }
 
 /// Downloads `url` into `dest_dir` as `<filename_prefix>-<unix-timestamp><ext>` and returns the
@@ -159,20 +168,20 @@ mod tests {
     async fn seed_unenriched_game(pool: &SqlitePool, title: &str) -> games::UnenrichedGame {
         let rom = roms::create(
             pool,
-            NewRom { system_id: "snes".into(), path: "snes/game.sfc".into(), crc32: None, size_bytes: None, discs: None },
+            NewRom { system_id: "snes".into(), path: "snes/game.sfc".into(), crc32: None, md5: None, size_bytes: None, discs: None },
         )
         .await
         .unwrap();
         let game = games_db::create(pool, games_db::NewGame { rom_id: rom.id, title: title.into() }).await.unwrap();
 
-        games::UnenrichedGame { id: game.id, title: game.title, system_id: "snes".into() }
+        games::UnenrichedGame { id: game.id, title: game.title, system_id: "snes".into(), rom_path: rom.path }
     }
 
     #[tokio::test]
     async fn enrich_one_marks_no_match_when_nothing_clears_the_threshold() {
         let (pool, _dir) = throwaway_pool().await;
         let game = seed_unenriched_game(&pool, "Totally Unmatched Title").await;
-        let media_root = tempfile::tempdir().unwrap();
+        let roms_root = tempfile::tempdir().unwrap();
 
         let server = MockServer::start().await;
         Mock::given(method("GET"))
@@ -187,7 +196,7 @@ mod tests {
         let client = SteamGridDbClient::with_base_url("test-key", &format!("{}/api/v2", server.uri()));
         let http = reqwest::Client::new();
 
-        let outcome = enrich_one(&client, &http, &pool, &game, media_root.path()).await.unwrap();
+        let outcome = enrich_one(&client, &http, &pool, &game, roms_root.path()).await.unwrap();
         assert_eq!(outcome, EnrichOutcome::NoMatch);
 
         let stored = games_db::get(&pool, &game.id).await.unwrap().unwrap();
@@ -196,10 +205,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn enrich_one_marks_matched_and_downloads_boxart_and_backdrop() {
+    async fn enrich_one_marks_matched_and_downloads_boxart_colocated_with_the_rom() {
         let (pool, _dir) = throwaway_pool().await;
         let game = seed_unenriched_game(&pool, "Chrono Trigger").await;
-        let media_root = tempfile::tempdir().unwrap();
+        let roms_root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(roms_root.path().join("snes")).unwrap();
 
         let server = MockServer::start().await;
         Mock::given(method("GET"))
@@ -223,40 +233,23 @@ mod tests {
             .respond_with(ResponseTemplate::new(200).set_body_bytes(b"fake-png-bytes".to_vec()))
             .mount(&server)
             .await;
-        Mock::given(method("GET"))
-            .and(path("/api/v2/heroes/game/99"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "success": true,
-                "data": [{ "id": 2, "url": format!("{}/images/backdrop.png", server.uri()) }],
-            })))
-            .mount(&server)
-            .await;
-        Mock::given(method("GET"))
-            .and(path("/images/backdrop.png"))
-            .respond_with(ResponseTemplate::new(200).set_body_bytes(b"fake-backdrop-bytes".to_vec()))
-            .mount(&server)
-            .await;
 
         let client = SteamGridDbClient::with_base_url("test-key", &format!("{}/api/v2", server.uri()));
         let http = reqwest::Client::new();
 
-        let outcome = enrich_one(&client, &http, &pool, &game, media_root.path()).await.unwrap();
-        assert_eq!(
-            outcome,
-            EnrichOutcome::Matched { steamgriddb_id: 99, confidence: 1.0, boxart_downloaded: true, backdrop_downloaded: true }
-        );
+        let outcome = enrich_one(&client, &http, &pool, &game, roms_root.path()).await.unwrap();
+        assert_eq!(outcome, EnrichOutcome::Matched { steamgriddb_id: 99, confidence: 1.0, boxart_downloaded: true });
 
         let stored = games_db::get(&pool, &game.id).await.unwrap().unwrap();
         assert_eq!(stored.steamgriddb_id, Some(99));
         assert!(stored.enriched_at.is_some());
 
         let media = game_media::list_for_game(&pool, &game.id).await.unwrap();
-        assert_eq!(media.len(), 2);
-        let boxart = media.iter().find(|m| m.kind == "boxart").expect("boxart row");
-        let backdrop = media.iter().find(|m| m.kind == "backdrop").expect("backdrop row");
-        assert!(boxart.local_path.starts_with("snes/"));
-        assert!(backdrop.local_path.starts_with("snes/"));
-        assert!(media_root.path().join(&boxart.local_path).exists());
-        assert!(media_root.path().join(&backdrop.local_path).exists());
+        assert_eq!(media.len(), 1);
+        let boxart = &media[0];
+        assert_eq!(boxart.kind, "boxart");
+        // Colocated: a sibling of the loose rom file (snes/game.sfc), prefixed with its stem.
+        assert!(boxart.local_path.starts_with("snes/game.boxart-"));
+        assert!(roms_root.path().join(&boxart.local_path).exists());
     }
 }

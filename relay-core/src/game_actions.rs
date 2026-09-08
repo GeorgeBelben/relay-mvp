@@ -214,7 +214,7 @@ mod tests {
     }
 
     async fn seed_game(pool: &SqlitePool, title: &str) -> String {
-        let rom = roms::create(pool, NewRom { system_id: "snes".into(), path: "snes/game.sfc".into(), crc32: None, size_bytes: None, discs: None })
+        let rom = roms::create(pool, NewRom { system_id: "snes".into(), path: "snes/game.sfc".into(), crc32: None, md5: None, size_bytes: None, discs: None })
             .await
             .unwrap();
         let game = games::create(pool, games::NewGame { rom_id: rom.id, title: title.into() }).await.unwrap();

@@ -21,7 +21,9 @@ pub async fn create_rom(
     size_bytes: Option<i64>,
     discs: Option<String>,
 ) -> Result<Rom, String> {
-    roms::create(pool.inner(), NewRom { system_id, path, crc32, size_bytes, discs })
+    // md5 isn't yet exposed on this manual command's IPC surface (no frontend caller needs it
+    // here) -- always None; a real md5 only ever comes from the automatic scan pipeline's probe.
+    roms::create(pool.inner(), NewRom { system_id, path, crc32, md5: None, size_bytes, discs })
         .await
         .map_err(crate::logging::err_to_string)
 }
@@ -36,7 +38,8 @@ pub async fn update_rom(
     size_bytes: Option<i64>,
     discs: Option<String>,
 ) -> Result<Rom, String> {
-    roms::update(pool.inner(), &id, NewRom { system_id, path, crc32, size_bytes, discs })
+    // Same reasoning as create_rom above -- md5 isn't on this command's IPC surface yet.
+    roms::update(pool.inner(), &id, NewRom { system_id, path, crc32, md5: None, size_bytes, discs })
         .await
         .map_err(crate::logging::err_to_string)
 }

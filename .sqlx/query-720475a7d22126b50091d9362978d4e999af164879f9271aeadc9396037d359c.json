@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT games.id, games.title, roms.system_id\n           FROM games\n           JOIN roms ON games.rom_id = roms.id\n           WHERE roms.status = 'ok' AND games.enriched_at IS NULL",
+  "query": "SELECT games.id, games.title, roms.system_id, roms.path as rom_path\n           FROM games\n           JOIN roms ON games.rom_id = roms.id\n           WHERE roms.status = 'ok' AND games.enriched_at IS NULL",
   "describe": {
     "columns": [
       {
@@ -35,6 +35,17 @@
             "name": "system_id"
           }
         }
+      },
+      {
+        "name": "rom_path",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "roms",
+            "name": "path"
+          }
+        }
       }
     ],
     "parameters": {
@@ -43,8 +54,9 @@
     "nullable": [
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "ca7bc74612c9c09c895698f8e02219cca8f75095b9737fca21d32af3538042f8"
+  "hash": "720475a7d22126b50091d9362978d4e999af164879f9271aeadc9396037d359c"
 }

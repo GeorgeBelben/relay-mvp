@@ -155,6 +155,7 @@ async fn launch_game_command_spawns_via_the_real_ipc_boundary_and_reports_status
             system_id: "gamecube".into(),
             path: "gamecube/game.iso".into(),
             crc32: None,
+            md5: None,
             size_bytes: None,
             discs: None,
         },
@@ -417,7 +418,7 @@ async fn game_media_commands_are_reachable_through_ipc() {
 
     let rom = relay_core::db::roms::create(
         &pool,
-        relay_core::db::roms::NewRom { system_id: "nes".into(), path: "nes/game.nes".into(), crc32: None, size_bytes: None, discs: None },
+        relay_core::db::roms::NewRom { system_id: "nes".into(), path: "nes/game.nes".into(), crc32: None, md5: None, size_bytes: None, discs: None },
     )
     .await
     .unwrap();

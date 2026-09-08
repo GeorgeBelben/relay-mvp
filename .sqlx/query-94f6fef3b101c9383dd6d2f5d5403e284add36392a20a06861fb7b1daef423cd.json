@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "INSERT INTO roms (id, system_id, path, crc32, size_bytes, discs, status, created_at, updated_at)\n           VALUES (?, ?, ?, ?, ?, ?, 'ok', ?, ?)\n           ON CONFLICT (path) DO UPDATE SET\n             crc32 = excluded.crc32,\n             size_bytes = excluded.size_bytes,\n             discs = excluded.discs,\n             status = 'ok',\n             updated_at = excluded.updated_at\n           RETURNING id, system_id, path, crc32, size_bytes, discs, status,\n                     created_at as \"created_at!: i64\", updated_at as \"updated_at!: i64\"",
+  "query": "SELECT id, system_id, path, crc32, md5, size_bytes, discs, status,\n                  created_at as \"created_at!: i64\", updated_at as \"updated_at!: i64\"\n           FROM roms WHERE id = ?",
   "describe": {
     "columns": [
       {
@@ -48,8 +48,19 @@
         }
       },
       {
-        "name": "size_bytes",
+        "name": "md5",
         "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "roms",
+            "name": "md5"
+          }
+        }
+      },
+      {
+        "name": "size_bytes",
+        "ordinal": 5,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -60,7 +71,7 @@
       },
       {
         "name": "discs",
-        "ordinal": 5,
+        "ordinal": 6,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -71,7 +82,7 @@
       },
       {
         "name": "status",
-        "ordinal": 6,
+        "ordinal": 7,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -82,7 +93,7 @@
       },
       {
         "name": "created_at!: i64",
-        "ordinal": 7,
+        "ordinal": 8,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -93,7 +104,7 @@
       },
       {
         "name": "updated_at!: i64",
-        "ordinal": 8,
+        "ordinal": 9,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -104,7 +115,7 @@
       }
     ],
     "parameters": {
-      "Right": 8
+      "Right": 1
     },
     "nullable": [
       false,
@@ -113,10 +124,11 @@
       true,
       true,
       true,
+      true,
       false,
       false,
       false
     ]
   },
-  "hash": "f0cedb37fe93a4f54e0e3fbbfb2dead5868afef9f45d2592e49dcab32a7974ca"
+  "hash": "94f6fef3b101c9383dd6d2f5d5403e284add36392a20a06861fb7b1daef423cd"
 }

@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "INSERT INTO roms (id, system_id, path, crc32, size_bytes, discs, status, created_at, updated_at)\n           VALUES (?, ?, ?, ?, ?, ?, 'ok', ?, ?)\n           RETURNING id, system_id, path, crc32, size_bytes, discs, status,\n                     created_at as \"created_at!: i64\", updated_at as \"updated_at!: i64\"",
+  "query": "INSERT INTO roms (id, system_id, path, crc32, md5, size_bytes, discs, status, created_at, updated_at)\n           VALUES (?, ?, ?, ?, ?, ?, ?, 'ok', ?, ?)\n           RETURNING id, system_id, path, crc32, md5, size_bytes, discs, status,\n                     created_at as \"created_at!: i64\", updated_at as \"updated_at!: i64\"",
   "describe": {
     "columns": [
       {
@@ -48,8 +48,19 @@
         }
       },
       {
-        "name": "size_bytes",
+        "name": "md5",
         "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "roms",
+            "name": "md5"
+          }
+        }
+      },
+      {
+        "name": "size_bytes",
+        "ordinal": 5,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -60,7 +71,7 @@
       },
       {
         "name": "discs",
-        "ordinal": 5,
+        "ordinal": 6,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -71,7 +82,7 @@
       },
       {
         "name": "status",
-        "ordinal": 6,
+        "ordinal": 7,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -82,7 +93,7 @@
       },
       {
         "name": "created_at!: i64",
-        "ordinal": 7,
+        "ordinal": 8,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -93,7 +104,7 @@
       },
       {
         "name": "updated_at!: i64",
-        "ordinal": 8,
+        "ordinal": 9,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -104,7 +115,7 @@
       }
     ],
     "parameters": {
-      "Right": 8
+      "Right": 9
     },
     "nullable": [
       false,
@@ -113,10 +124,11 @@
       true,
       true,
       true,
+      true,
       false,
       false,
       false
     ]
   },
-  "hash": "c69167eb2426c4a0636969f563900e3ab850a4967b618abc6db499a59519f15a"
+  "hash": "1a5257147d1457ebc624d9dc285f7445cf07207804cb24d4b50637051857f5f7"
 }

@@ -1,0 +1,1 @@
+ALTER TABLE roms DROP COLUMN md5;

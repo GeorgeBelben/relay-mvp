@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id, system_id, path, crc32, size_bytes, discs, status,\n                  created_at as \"created_at!: i64\", updated_at as \"updated_at!: i64\"\n           FROM roms ORDER BY path",
+  "query": "INSERT INTO roms (id, system_id, path, crc32, md5, size_bytes, discs, status, created_at, updated_at)\n           VALUES (?, ?, ?, ?, ?, ?, ?, 'ok', ?, ?)\n           ON CONFLICT (path) DO UPDATE SET\n             crc32 = excluded.crc32,\n             md5 = excluded.md5,\n             size_bytes = excluded.size_bytes,\n             discs = excluded.discs,\n             status = 'ok',\n             updated_at = excluded.updated_at\n           RETURNING id, system_id, path, crc32, md5, size_bytes, discs, status,\n                     created_at as \"created_at!: i64\", updated_at as \"updated_at!: i64\"",
   "describe": {
     "columns": [
       {
@@ -48,8 +48,19 @@
         }
       },
       {
-        "name": "size_bytes",
+        "name": "md5",
         "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "roms",
+            "name": "md5"
+          }
+        }
+      },
+      {
+        "name": "size_bytes",
+        "ordinal": 5,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -60,7 +71,7 @@
       },
       {
         "name": "discs",
-        "ordinal": 5,
+        "ordinal": 6,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -71,7 +82,7 @@
       },
       {
         "name": "status",
-        "ordinal": 6,
+        "ordinal": 7,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -82,7 +93,7 @@
       },
       {
         "name": "created_at!: i64",
-        "ordinal": 7,
+        "ordinal": 8,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -93,7 +104,7 @@
       },
       {
         "name": "updated_at!: i64",
-        "ordinal": 8,
+        "ordinal": 9,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -104,7 +115,7 @@
       }
     ],
     "parameters": {
-      "Right": 0
+      "Right": 9
     },
     "nullable": [
       false,
@@ -113,10 +124,11 @@
       true,
       true,
       true,
+      true,
       false,
       false,
       false
     ]
   },
-  "hash": "48a566bb23eb1ac83060fc80091b31d8218a399a287d9a442f356154afb478fa"
+  "hash": "8caa5b6c9b63dc12cb4c4abb20a0fa83688465fc700aa4e11f8d6776d7b545ad"
 }
