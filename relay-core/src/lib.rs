@@ -1,5 +1,6 @@
 pub mod db;
 pub mod emulator;
+pub mod game_actions;
 pub mod game_media_files;
 pub mod ingestion;
 pub mod init;
