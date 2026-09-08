@@ -1,4 +1,4 @@
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU32};
 
 use clap::{Parser, Subcommand};
 
@@ -31,6 +31,40 @@ enum Commands {
         #[command(subcommand)]
         action: ConfigAction,
     },
+    /// Launch a game by id (see `relay games`)
+    Play { game_id: String },
+    /// Manage Wi-Fi
+    Wifi {
+        #[command(subcommand)]
+        action: WifiAction,
+    },
+    /// Manage Bluetooth controllers
+    Bluetooth {
+        #[command(subcommand)]
+        action: BluetoothAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum WifiAction {
+    /// List nearby Wi-Fi networks
+    List,
+    /// Connect to a Wi-Fi network
+    Connect {
+        ssid: String,
+        #[arg(long)]
+        password: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum BluetoothAction {
+    /// Scan for nearby devices
+    Scan,
+    /// List already-paired devices
+    List,
+    /// Pair with a device by address
+    Pair { address: String },
 }
 
 #[derive(Subcommand)]
@@ -67,6 +101,9 @@ async fn main() {
         Commands::Doctor => doctor(&report),
         Commands::Profiles { action } => profiles(&report, action).await,
         Commands::Config { action } => config(&report, action).await,
+        Commands::Play { game_id } => play(&report, &game_id).await,
+        Commands::Wifi { action } => wifi(action).await,
+        Commands::Bluetooth { action } => bluetooth(action).await,
     };
 
     if let Err(err) = result {
@@ -94,7 +131,7 @@ async fn games(report: &relay_core::init::Report) -> Result<(), String> {
     println!("{} game(s):", games.len());
     for game in &games {
         let enriched = if game.enriched_at.is_some() { "" } else { " (not yet identified)" };
-        println!("  {}{}", game.title, enriched);
+        println!("  {} [{}]{}", game.title, game.id, enriched);
     }
 
     Ok(())
@@ -160,6 +197,66 @@ async fn config(report: &relay_core::init::Report, action: ConfigAction) -> Resu
             relay_core::db::settings::set(&report.pool, &key, &value).await.map_err(|err| format!("couldn't write setting: {err}"))?;
             println!("Set {key} = {value}");
         }
+    }
+    Ok(())
+}
+
+async fn play(report: &relay_core::init::Report, game_id: &str) -> Result<(), String> {
+    let library_root = relay_core::library::library_root();
+    let config_dir = report.data_dir.join("launch-configs");
+    let running = AtomicBool::new(false);
+    let active_pid = AtomicU32::new(0);
+
+    relay_core::emulator::launch::launch_game(
+        &report.pool,
+        &library_root,
+        &config_dir,
+        game_id,
+        &running,
+        &active_pid,
+        |status| println!("{status:?}"),
+        |log| println!("[{:?}] {}", log.stream, log.line),
+    )
+    .await
+    .map_err(|err| format!("couldn't launch game: {err}"))
+}
+
+async fn wifi(action: WifiAction) -> Result<(), String> {
+    match action {
+        WifiAction::List => {
+            let networks = relay_core::system::network::list_wifi_networks("nmcli").await?;
+            println!("{} network(s):", networks.len());
+            for network in &networks {
+                let lock = if network.secured { " (secured)" } else { "" };
+                let marker = if network.in_use { "*" } else { " " };
+                println!("{marker} {} (signal {}){lock}", network.ssid, network.signal);
+            }
+        }
+        WifiAction::Connect { ssid, password } => {
+            relay_core::system::network::connect_to_wifi_network("nmcli", &ssid, password.as_deref())
+                .await
+                .map_err(|err| err.to_string())?;
+            println!("Connected to {ssid}");
+        }
+    }
+    Ok(())
+}
+
+async fn bluetooth(action: BluetoothAction) -> Result<(), String> {
+    let devices = match action {
+        BluetoothAction::Scan => relay_core::system::bluetooth::scan_for_devices("bluetoothctl").await?,
+        BluetoothAction::List => relay_core::system::bluetooth::list_paired_devices("bluetoothctl").await?,
+        BluetoothAction::Pair { address } => {
+            relay_core::system::bluetooth::pair_device("bluetoothctl", &address).await.map_err(|err| err.to_string())?;
+            println!("Paired with {address}");
+            return Ok(());
+        }
+    };
+
+    println!("{} device(s):", devices.len());
+    for device in &devices {
+        let battery = device.battery_percent.map(|b| format!(" ({b}%)")).unwrap_or_default();
+        println!("  {} [{}]{battery}", device.name, device.address);
     }
     Ok(())
 }
