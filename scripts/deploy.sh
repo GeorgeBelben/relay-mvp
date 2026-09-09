@@ -9,7 +9,7 @@ set -euo pipefail
 
 REPO="GeorgeBelben/relay"
 WORKFLOW="build-dev.yml"
-DEVICE="relay@relay.local"
+DEVICE="${DEVICE:-relay@relay.local}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
 

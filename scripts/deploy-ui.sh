@@ -13,7 +13,7 @@ set -euo pipefail
 
 REPO="GeorgeBelben/relay"
 WORKFLOW="build-dev-ui.yml"
-DEVICE="relay@relay.local"
+DEVICE="${DEVICE:-relay@relay.local}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
@@ -56,13 +56,20 @@ echo "Copying to $DEVICE..."
 # Matches the paths relay-ui/scripts/relay-install-deb.sh (the existing root-owned wrapper, see this
 # script's header) already expects -- /opt/relay/incoming must be relay-user-writable, a one-time
 # provisioning step, not something this script creates.
+#
+# build-dev-ui.yml's upload-artifact step preserves each path's original directory structure (it
+# lists three separate roots: target/release/bundle/deb, relay-ui/packaging/systemd, and
+# relay-ui/packaging/cursor-theme), so these land nested inside $TMP_DIR, not flat at its root --
+# find (as $DEB_FILE already used) rather than a literal $TMP_DIR/<name> path.
 scp "$DEB_FILE" "$DEVICE:/opt/relay/incoming/relay-gui.deb"
-if [ -f "$TMP_DIR/relay.service" ]; then
-  scp "$TMP_DIR/relay.service" "$DEVICE:/opt/relay/incoming/relay.service"
+SERVICE_FILE=$(find "$TMP_DIR" -name 'relay.service' | head -1)
+if [ -n "$SERVICE_FILE" ]; then
+  scp "$SERVICE_FILE" "$DEVICE:/opt/relay/incoming/relay.service"
 fi
-if [ -d "$TMP_DIR/relay-blank" ]; then
+CURSOR_THEME_DIR=$(find "$TMP_DIR" -type d -name 'relay-blank' | head -1)
+if [ -n "$CURSOR_THEME_DIR" ]; then
   ssh "$DEVICE" 'rm -rf /opt/relay/incoming/cursor-theme && mkdir -p /opt/relay/incoming/cursor-theme'
-  scp -r "$TMP_DIR/relay-blank" "$DEVICE:/opt/relay/incoming/cursor-theme/"
+  scp -r "$CURSOR_THEME_DIR" "$DEVICE:/opt/relay/incoming/cursor-theme/"
 fi
 
 echo "Installing on $DEVICE..."

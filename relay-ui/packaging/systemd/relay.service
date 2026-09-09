@@ -20,6 +20,11 @@ StandardOutput=journal
 StandardError=journal
 UtmpIdentifier=tty1
 UtmpMode=user
+# Nothing else calls this: we Conflicts= getty@tty1 (the usual thing that triggers plymouth's
+# quit on a normal boot), and there's no display manager either. --retain-splash quits the daemon
+# without hiding the splash frame first, so the last frame stays on screen (no black flash) until
+# cage paints over it, instead of the splash hanging forever.
+ExecStartPre=-/usr/bin/plymouth quit --retain-splash
 ExecStart=/usr/bin/cage -- /usr/bin/relay-gui
 Restart=always
 RestartSec=2
