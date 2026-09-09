@@ -106,6 +106,7 @@ function Settings() {
               <ListRow label="Library" to="/settings/library" />
               <ListRow label="Metadata" to="/settings/metadata" />
               <ListRow label="Profiles" to="/settings/profiles" />
+              <ListRow label="Debug" to="/settings/debug" />
             </List>
             {updateState.state === "not-available" && (
               <p className="text-sm text-muted-foreground">You're on the latest version.</p>
