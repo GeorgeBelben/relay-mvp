@@ -52,6 +52,15 @@ if ! command -v cage >/dev/null 2>&1; then
   apt-get install -y cage
 fi
 
+# relay-cli's `relay bluetooth` commands shell out to bluetoothctl -- not installed on a minimal
+# Ubuntu install. Confirmed missing (alongside cage) provisioning artemis.local from scratch,
+# despite real Bluetooth hardware (Intel AX200) being present.
+if ! command -v bluetoothctl >/dev/null 2>&1; then
+  apt-get update
+  apt-get install -y bluez
+  systemctl enable --now bluetooth.service
+fi
+
 mkdir -p /opt/relay/incoming
 chown relay:relay /opt/relay/incoming
 
