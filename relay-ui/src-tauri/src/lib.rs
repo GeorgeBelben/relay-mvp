@@ -2,7 +2,7 @@ pub mod commands;
 pub mod logging;
 
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
@@ -42,6 +42,29 @@ pub fn run() {
             app.manage(commands::ingestion::RescanGuard::default());
             app.manage(commands::ingestion::ScanStatusState::default());
             app.manage(commands::emulator::LauncherState::default());
+
+            // Runs for the app's whole lifetime -- relay-ui's menu needs gamepad input from the
+            // moment it starts, not on-demand, so this isn't a command the frontend invokes.
+            // Reads raw evdev directly (same approach as RetroArch's own recommended Linux joypad
+            // driver) rather than the webview's Gamepad API, which WebKitGTK doesn't reliably ship
+            // (see relay_core::system::gamepad's module docs).
+            let connected_gamepads = commands::gamepad::ConnectedGamepads::default();
+            app.manage(connected_gamepads.clone());
+
+            let gamepad_app_handle = app.handle().clone();
+            relay_core::system::gamepad::watch_gamepads(move |event| {
+                use relay_core::system::gamepad::GamepadEvent;
+                match &event {
+                    GamepadEvent::Connected { id, .. } => {
+                        connected_gamepads.lock().unwrap().insert(*id);
+                    }
+                    GamepadEvent::Disconnected { id } => {
+                        connected_gamepads.lock().unwrap().remove(id);
+                    }
+                    _ => {}
+                }
+                let _ = gamepad_app_handle.emit("gamepad:event", &event);
+            });
 
             // Kiosk has no mouse input; hide the cursor and only reveal the window once it's
             // hidden, so there's never a frame with GTK's default arrow visible (see main.css's
@@ -134,6 +157,7 @@ pub fn run() {
             commands::datetime::set_timezone,
             commands::datetime::set_ntp_enabled,
             commands::datetime::set_time,
+            commands::gamepad::list_connected_gamepads,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

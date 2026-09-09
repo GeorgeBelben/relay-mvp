@@ -1,15 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startGamepadListener, stickToDirection } from "./gamepad";
+import type { BackendGamepadEvent } from "./backendEvent";
 
-function fakeGamepad({
-  pressed = [],
-  axes = [0, 0],
-}: { pressed?: number[]; axes?: number[] } = {}): Gamepad {
-  const buttons = Array.from(
-    { length: 17 },
-    (_, i) => ({ pressed: pressed.includes(i) }) as GamepadButton,
-  );
-  return { buttons, axes } as unknown as Gamepad;
+type Listener = (event: { payload: BackendGamepadEvent }) => void;
+let capturedListener: Listener | undefined;
+const unlistenMock = vi.fn();
+const listenMock = vi.fn((_event: string, handler: Listener) => {
+  capturedListener = handler;
+  return Promise.resolve(unlistenMock);
+});
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: (event: string, handler: Listener) => listenMock(event, handler),
+}));
+
+function emit(event: BackendGamepadEvent) {
+  capturedListener!({ payload: event });
 }
 
 describe("stickToDirection", () => {
@@ -26,40 +31,23 @@ describe("stickToDirection", () => {
 });
 
 describe("startGamepadListener", () => {
-  let rafCallback: FrameRequestCallback | null = null;
-  let cancel: ReturnType<typeof vi.fn>;
-  let pads: (Gamepad | null)[] = [];
-
   beforeEach(() => {
-    rafCallback = null;
-    pads = [];
-    cancel = vi.fn();
-    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
-      rafCallback = cb;
-      return 1;
-    });
-    vi.stubGlobal("cancelAnimationFrame", cancel);
-    vi.stubGlobal("navigator", { getGamepads: () => pads });
+    capturedListener = undefined;
+    unlistenMock.mockClear();
+    listenMock.mockClear();
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "performance"] });
   });
 
   afterEach(() => {
-    vi.unstubAllGlobals();
+    vi.useRealTimers();
   });
 
-  function tick(now: number) {
-    const cb = rafCallback;
-    rafCallback = null;
-    cb?.(now);
-  }
-
-  it("fires a direction event once on press, not every frame while held", () => {
+  it("fires a direction event once on press, not on every subsequent timer tick", () => {
     const onEvent = vi.fn();
     startGamepadListener(onEvent, vi.fn());
 
-    pads = [fakeGamepad({ pressed: [12] })]; // up
-    tick(0);
-    tick(50);
-    tick(100);
+    emit({ type: "button-pressed", id: 0, button: "d-pad-up" });
+    vi.advanceTimersByTime(100); // well within the 400ms initial repeat delay
 
     expect(onEvent).toHaveBeenCalledTimes(1);
     expect(onEvent).toHaveBeenCalledWith({ type: "direction", direction: "up" });
@@ -69,22 +57,31 @@ describe("startGamepadListener", () => {
     const onEvent = vi.fn();
     startGamepadListener(onEvent, vi.fn());
 
-    pads = [fakeGamepad({ pressed: [12] })];
-    tick(0); // initial press
-    tick(500); // past the 400ms initial delay -> repeat
-    tick(650); // past the 120ms repeat interval since the last repeat -> repeat again
+    emit({ type: "button-pressed", id: 0, button: "d-pad-up" }); // initial press
+    vi.advanceTimersByTime(500); // past the 400ms initial delay -> repeat
+    vi.advanceTimersByTime(150); // past the 120ms repeat interval since the last repeat -> repeat again
 
     expect(onEvent).toHaveBeenCalledTimes(3);
+  });
+
+  it("stops repeating once the button is released", () => {
+    const onEvent = vi.fn();
+    startGamepadListener(onEvent, vi.fn());
+
+    emit({ type: "button-pressed", id: 0, button: "d-pad-up" });
+    emit({ type: "button-released", id: 0, button: "d-pad-up" });
+    onEvent.mockClear();
+
+    vi.advanceTimersByTime(1000);
+    expect(onEvent).not.toHaveBeenCalled();
   });
 
   it("fires a confirm/back action once on press, not on release", () => {
     const onEvent = vi.fn();
     startGamepadListener(onEvent, vi.fn());
 
-    pads = [fakeGamepad({ pressed: [0] })]; // confirm
-    tick(0);
-    pads = [fakeGamepad()];
-    tick(16);
+    emit({ type: "button-pressed", id: 0, button: "south" }); // confirm
+    emit({ type: "button-released", id: 0, button: "south" });
 
     expect(onEvent).toHaveBeenCalledTimes(1);
     expect(onEvent).toHaveBeenCalledWith({ type: "action", action: "confirm" });
@@ -94,8 +91,7 @@ describe("startGamepadListener", () => {
     const onEvent = vi.fn();
     startGamepadListener(onEvent, vi.fn());
 
-    pads = [fakeGamepad({ pressed: [16] })]; // power
-    tick(0);
+    emit({ type: "button-pressed", id: 0, button: "mode" });
 
     expect(onEvent).toHaveBeenCalledWith({ type: "action", action: "power" });
   });
@@ -104,33 +100,56 @@ describe("startGamepadListener", () => {
     const onEvent = vi.fn();
     startGamepadListener(onEvent, vi.fn());
 
-    pads = [fakeGamepad({ pressed: [1] })]; // back
-    tick(0);
-    pads = [fakeGamepad()];
-    tick(16);
-    pads = [fakeGamepad({ pressed: [1] })];
-    tick(32);
+    emit({ type: "button-pressed", id: 0, button: "east" }); // back
+    emit({ type: "button-released", id: 0, button: "east" });
+    emit({ type: "button-pressed", id: 0, button: "east" });
 
     expect(onEvent).toHaveBeenCalledTimes(2);
     expect(onEvent).toHaveBeenNthCalledWith(2, { type: "action", action: "back" });
   });
 
-  it("calls onUsed only on frames where input actually happened", () => {
+  it("drives direction from the left stick, ignoring axis changes inside the deadzone", () => {
+    const onEvent = vi.fn();
+    startGamepadListener(onEvent, vi.fn());
+
+    emit({ type: "axis-changed", id: 0, axis: "left-stick-x", value: 0.1 });
+    vi.advanceTimersByTime(16);
+    expect(onEvent).not.toHaveBeenCalled();
+
+    emit({ type: "axis-changed", id: 0, axis: "left-stick-x", value: 0.9 });
+    vi.advanceTimersByTime(16);
+    expect(onEvent).toHaveBeenCalledWith({ type: "direction", direction: "right" });
+  });
+
+  it("forgets a disconnected pad's held direction", () => {
+    const onEvent = vi.fn();
+    startGamepadListener(onEvent, vi.fn());
+
+    emit({ type: "button-pressed", id: 0, button: "d-pad-up" });
+    emit({ type: "disconnected", id: 0 });
+    onEvent.mockClear();
+
+    vi.advanceTimersByTime(1000);
+    expect(onEvent).not.toHaveBeenCalled();
+  });
+
+  it("calls onUsed only when input actually happened", () => {
     const onUsed = vi.fn();
     startGamepadListener(vi.fn(), onUsed);
 
-    pads = [fakeGamepad()];
-    tick(0);
+    emit({ type: "axis-changed", id: 0, axis: "left-stick-x", value: 0.1 }); // inside deadzone
+    vi.advanceTimersByTime(16);
     expect(onUsed).not.toHaveBeenCalled();
 
-    pads = [fakeGamepad({ pressed: [0] })];
-    tick(16);
+    emit({ type: "button-pressed", id: 0, button: "south" });
     expect(onUsed).toHaveBeenCalledOnce();
   });
 
-  it("cancels the animation frame when torn down", () => {
+  it("stops the repeat timer and unlistens when torn down", async () => {
     const stop = startGamepadListener(vi.fn(), vi.fn());
     stop();
-    expect(cancel).toHaveBeenCalledWith(1);
+    await Promise.resolve(); // the unlisten function only resolves after stop()'s .then()
+
+    expect(unlistenMock).toHaveBeenCalled();
   });
 });

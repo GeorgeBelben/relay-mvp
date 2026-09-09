@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
-import { getGamepads } from "./getGamepads";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { navEvents, rumbleEvents, soundEvents, startInputListeners } from "./nav";
 import { useInputMethodStore } from "./store";
+import type { BackendGamepadEvent } from "./backendEvent";
 import type { NavEvent } from "./types";
 
 // Mounted once at the app root -- starts the keyboard/gamepad polling for the lifetime of the app.
@@ -27,33 +29,38 @@ export function useLastInputMethod() {
   return useInputMethodStore((state) => state.lastInputMethod);
 }
 
-function readConnectedIndexes(): number[] {
-  return [...getGamepads()]
-    .filter((pad): pad is Gamepad => pad !== null)
-    .map((pad) => pad.index)
-    .sort((a, b) => a - b);
-}
-
-// Just presence, not identity -- no player/profile assignment. Slots are the sorted gamepad
-// indexes, low to high, so "controller 1/2/3/4" stays stable and predictable rather than tracking
-// which physical pad is "assigned" to which slot.
+// Just presence, not identity -- no player/profile assignment. Slots are the sorted gamepad ids,
+// low to high, so "controller 1/2/3/4" stays stable and predictable rather than tracking which
+// physical pad is "assigned" to which slot.
 //
-// gamepadconnected/disconnected cover hot-plug, but Chromium doesn't fire gamepadconnected
-// retroactively for a pad that was already connected before this hook's listener attaches (e.g.
-// on a fresh page load with a controller already plugged in) until that pad sends its first
-// input -- so this also reads the current state directly on mount to catch that case immediately
-// rather than waiting on a button press.
+// The backend's gamepad watcher starts once at app setup (see lib.rs), before this hook's
+// listener necessarily attaches -- list_connected_gamepads pulls whatever's already connected on
+// mount (mirroring get_scan_status's same "pull on mount, then stay live via the push event"
+// shape), so a controller plugged in before the window loads still shows up immediately rather
+// than waiting on its next connect event.
 export function useConnectedControllers(): number[] {
-  const [connected, setConnected] = useState<number[]>(readConnectedIndexes);
+  const [connected, setConnected] = useState<number[]>([]);
 
   useEffect(() => {
-    const refresh = () => setConnected(readConnectedIndexes());
-    refresh();
-    window.addEventListener("gamepadconnected", refresh);
-    window.addEventListener("gamepaddisconnected", refresh);
+    let cancelled = false;
+    const ids = new Set<number>();
+
+    invoke<number[]>("list_connected_gamepads").then((initial) => {
+      if (cancelled) return;
+      for (const id of initial) ids.add(id);
+      setConnected([...ids].sort((a, b) => a - b));
+    });
+
+    const unlisten = listen<BackendGamepadEvent>("gamepad:event", ({ payload }) => {
+      if (payload.type === "connected") ids.add(payload.id);
+      else if (payload.type === "disconnected") ids.delete(payload.id);
+      else return; // button/axis events don't change presence
+      setConnected([...ids].sort((a, b) => a - b));
+    });
+
     return () => {
-      window.removeEventListener("gamepadconnected", refresh);
-      window.removeEventListener("gamepaddisconnected", refresh);
+      cancelled = true;
+      unlisten.then((f) => f());
     };
   }, []);
 

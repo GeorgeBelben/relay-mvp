@@ -2,6 +2,7 @@ pub mod bluetooth;
 pub mod datetime;
 pub mod emulator;
 pub mod game_actions;
+pub mod gamepad;
 pub mod game_media;
 pub mod games;
 pub mod ingestion;
