@@ -115,7 +115,17 @@ pub fn watch_gamepads(on_event: impl Fn(GamepadEvent) + Send + 'static) {
                     EventType::Disconnected => Some(GamepadEvent::Disconnected { id }),
                     EventType::ButtonPressed(button, _) => Some(GamepadEvent::ButtonPressed { id, button: map_button(button) }),
                     EventType::ButtonReleased(button, _) => Some(GamepadEvent::ButtonReleased { id, button: map_button(button) }),
-                    EventType::AxisChanged(axis, value, _) => Some(GamepadEvent::AxisChanged { id, axis: map_axis(axis), value }),
+                    EventType::AxisChanged(axis, value, _) => {
+                        let mapped_axis = map_axis(axis);
+                        // gilrs's raw Y-axis convention on Linux is inverted from what the rest of
+                        // this app expects (confirmed against real hardware: up read as down and
+                        // vice versa) -- the app's own direction logic (stickToDirection) was never
+                        // touched by this rewrite and still assumes the old Web Gamepad API's
+                        // convention (negative = up), so this normalizes at the source instead of
+                        // chasing the sign flip through every consumer.
+                        let value = if matches!(mapped_axis, GamepadAxis::LeftStickY | GamepadAxis::RightStickY) { -value } else { value };
+                        Some(GamepadEvent::AxisChanged { id, axis: mapped_axis, value })
+                    }
                     _ => None,
                 };
                 if let Some(event) = mapped {
