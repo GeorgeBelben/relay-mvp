@@ -23,7 +23,8 @@ jobs:
             librsvg2-dev \
             patchelf \
             libssl-dev \
-            libgtk-3-dev
+            libgtk-3-dev \
+            libudev-dev # relay-core's gilrs dependency needs this (libudev-sys) on Linux
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable

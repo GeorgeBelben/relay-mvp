@@ -13,6 +13,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install libudev
+        # relay-core's gilrs dependency (libudev-sys) needs this on Linux -- relay-cli links
+        # relay-core, so this build needs it too, not just relay-ui's.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libudev-dev
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
